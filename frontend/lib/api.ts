@@ -1,6 +1,5 @@
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ??
-  `${process.env.NEXT_PUBLIC_API_URL}";
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? "http://localhost:8000";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -20,7 +19,7 @@ export interface ParsedPaper {
 export interface GenerateConfig {
   paper_id: string;
   talk_length: "lightning" | "conference" | "seminar";
-  template_style: "minimal" | "academic" | "dark";
+  template_style: "minimal" | "academic";
   include_speaker_notes: boolean;
   include_backup_slides: boolean;
 }

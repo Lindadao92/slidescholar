@@ -92,7 +92,7 @@ export default function ConfigurePage() {
   const pageCount = paper.num_pages ?? 0;
   const structureLabel = paper.structure ?? "IMRaD";
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? `${process.env.NEXT_PUBLIC_API_URL}";
+  const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? "http://localhost:8000";
 
   const handleGenerate = () => {
     const config = {
