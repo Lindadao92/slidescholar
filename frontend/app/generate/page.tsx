@@ -56,7 +56,7 @@ export default function GeneratePage() {
 
     (async () => {
       try {
-        const res = await fetch("http://localhost:8000/api/generate", {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

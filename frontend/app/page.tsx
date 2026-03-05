@@ -80,12 +80,12 @@ export default function Home() {
       if (file) {
         const formData = new FormData();
         formData.append("file", file);
-        res = await fetch("http://localhost:8000/api/parse", {
+        res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/parse`, {
           method: "POST",
           body: formData,
         });
       } else {
-        res = await fetch("http://localhost:8000/api/parse-arxiv", {
+        res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/parse-arxiv`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ arxiv_url: arxivUrl.trim() }),

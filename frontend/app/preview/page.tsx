@@ -83,7 +83,7 @@ interface SlidePlan {
 const API_BASE =
   typeof window !== "undefined"
     ? (process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ??
-      "http://localhost:8000")
+      `${process.env.NEXT_PUBLIC_API_URL}")
     : "";
 
 /** Slide field (camelCase) -> BackendSlide field (snake_case) */
