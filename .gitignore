@@ -1,0 +1,22 @@
+# Secrets
+.env
+.env.*
+backend/.env
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Temp / generated files
+/tmp/
+*.pptx
+*.pdf
+
+# OS
+.DS_Store
