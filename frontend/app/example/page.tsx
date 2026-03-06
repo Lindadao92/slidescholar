@@ -1,39 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 
+const TOTAL_SLIDES = 41;
+const slides = Array.from({ length: TOTAL_SLIDES }, (_, i) => `/example-slides/slide-${i + 1}.png`);
+
 export default function ExamplePage() {
-  const [slides, setSlides] = useState<string[]>([]);
   const [currentSlide, setCurrentSlide] = useState(0);
-
-  useEffect(() => {
-    // Discover slide images from the public/example-slides/ folder
-    // We look for slide-1.png, slide-2.png, etc. up to a reasonable max
-    const found: string[] = [];
-    let checking = true;
-    let i = 1;
-
-    async function discoverSlides() {
-      while (checking && i <= 30) {
-        const path = `/example-slides/slide-${i}.png`;
-        try {
-          const res = await fetch(path, { method: "HEAD" });
-          if (res.ok) {
-            found.push(path);
-            i++;
-          } else {
-            checking = false;
-          }
-        } catch {
-          checking = false;
-        }
-      }
-      setSlides(found);
-    }
-
-    discoverSlides();
-  }, []);
 
   return (
     <div className="min-h-screen bg-white">
@@ -73,51 +47,52 @@ export default function ExamplePage() {
 
         {/* RIGHT: Slides */}
         <div className="flex flex-col lg:w-1/2">
-          <div className="border-b border-gray-100 bg-gray-50 px-4 py-2">
+          <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
               Generated Slides
             </span>
+            <a
+              href="/sample-presentation.pptx"
+              download
+              className="text-xs font-medium text-accent hover:underline"
+            >
+              Download .pptx
+            </a>
           </div>
 
-          {slides.length === 0 ? (
-            <div className="flex flex-1 items-center justify-center text-sm text-gray-400">
-              No example slides found. Add PNG files to public/example-slides/
+          <div className="flex flex-1 flex-col">
+            {/* Slide display */}
+            <div className="flex flex-1 items-center justify-center bg-gray-50 p-4">
+              <img
+                src={slides[currentSlide]}
+                alt={`Slide ${currentSlide + 1}`}
+                className="max-h-full max-w-full rounded-lg border border-gray-200 shadow-md"
+              />
             </div>
-          ) : (
-            <div className="flex flex-1 flex-col">
-              {/* Slide display */}
-              <div className="flex flex-1 items-center justify-center bg-gray-50 p-4">
-                <img
-                  src={slides[currentSlide]}
-                  alt={`Slide ${currentSlide + 1}`}
-                  className="max-h-full max-w-full rounded-lg border border-gray-200 shadow-md"
-                />
-              </div>
 
-              {/* Navigation */}
-              <div className="flex items-center justify-center gap-4 border-t border-gray-100 px-4 py-3">
-                <button
-                  onClick={() => setCurrentSlide((s) => Math.max(0, s - 1))}
-                  disabled={currentSlide === 0}
-                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  &larr; Prev
-                </button>
-                <span className="text-sm text-gray-500">
-                  {currentSlide + 1} / {slides.length}
-                </span>
-                <button
-                  onClick={() =>
-                    setCurrentSlide((s) => Math.min(slides.length - 1, s + 1))
-                  }
-                  disabled={currentSlide === slides.length - 1}
-                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Next &rarr;
-                </button>
-              </div>
+            {/* Navigation */}
+            <div className="flex items-center justify-center gap-4 border-t border-gray-100 px-4 py-3">
+              <button
+                onClick={() => setCurrentSlide((s) => Math.max(0, s - 1))}
+                disabled={currentSlide === 0}
+                className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                &larr; Prev
+              </button>
+              <span className="text-sm text-gray-500">
+                {currentSlide + 1} / {slides.length}
+              </span>
+              <button
+                onClick={() =>
+                  setCurrentSlide((s) => Math.min(slides.length - 1, s + 1))
+                }
+                disabled={currentSlide === slides.length - 1}
+                className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next &rarr;
+              </button>
             </div>
-          )}
+          </div>
         </div>
       </div>
 

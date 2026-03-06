@@ -18,5 +18,9 @@ out/
 *.pptx
 *.pdf
 
+# Allow example assets in frontend public
+!frontend/public/sample-paper.pdf
+!frontend/public/sample-presentation.pptx
+
 # OS
 .DS_Store
