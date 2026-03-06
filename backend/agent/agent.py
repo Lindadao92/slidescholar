@@ -59,7 +59,16 @@ def fetch_arxiv_papers(max_papers: int) -> list[dict]:
             for entry in feed.entries:
                 if len(papers) >= max_papers:
                     break
-                arxiv_id = entry.get("id", "").split("/abs/")[-1].strip()
+                raw_id = entry.get("id", "")
+# Handle both formats: /abs/2603.04448 and oai:arXiv.org:2603.04448v1
+if "/abs/" in raw_id:
+    arxiv_id = raw_id.split("/abs/")[-1].strip()
+elif "arXiv.org:" in raw_id:
+    arxiv_id = raw_id.split("arXiv.org:")[-1].strip()
+else:
+    arxiv_id = raw_id.strip()
+# Remove version suffix (v1, v2 etc)
+arxiv_id = arxiv_id.split("v")[0] if "v" in arxiv_id else arxiv_id
                 if not arxiv_id or arxiv_id in seen_ids:
                     continue
                 seen_ids.add(arxiv_id)
