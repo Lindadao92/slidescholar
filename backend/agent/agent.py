@@ -27,7 +27,7 @@ SLIDESCHOLAR_API   = os.environ["SLIDESCHOLAR_API_URL"]
 GMAIL_ADDRESS      = os.environ["GMAIL_ADDRESS"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 PAPERS_PER_RUN     = int(os.getenv("PAPERS_PER_RUN", "5"))
-TALK_LENGTH        = os.getenv("TALK_LENGTH", "15-min")
+TALK_LENGTH        = os.getenv("TALK_LENGTH", "conference")
 LOG_LEVEL          = os.getenv("LOG_LEVEL", "INFO")
 
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
@@ -53,8 +53,7 @@ def parse_arxiv_id(raw_id: str) -> str:
     else:
         arxiv_id = raw_id.strip()
     # Remove version suffix like v1, v2
-    if re.search(r'v\d+$', arxiv_id):
-        arxiv_id = re.sub(r'v\d+$', '', arxiv_id)
+    arxiv_id = re.sub(r'v\d+$', '', arxiv_id)
     return arxiv_id
 
 
@@ -118,6 +117,7 @@ def extract_emails_from_pdf(pdf_bytes: bytes) -> list:
 def generate_slides(pdf_bytes: bytes, title: str):
     """Call SlideScholar API to parse PDF and generate .pptx."""
     try:
+        # Step 1: Parse — returns paper_id
         log.info(f"Parsing PDF for: {title[:60]}")
         parse_resp = requests.post(
             f"{SLIDESCHOLAR_API}/api/parse",
@@ -126,30 +126,60 @@ def generate_slides(pdf_bytes: bytes, title: str):
         )
         parse_resp.raise_for_status()
         parse_data = parse_resp.json()
-        doc_id = parse_data.get("doc_id")
-        if not doc_id:
-            log.error("No doc_id returned from /api/parse")
+        paper_id = parse_data.get("paper_id")
+        if not paper_id:
+            log.error(f"No paper_id returned from /api/parse. Response: {parse_data}")
             return None
 
-        log.info(f"Generating slides for doc_id={doc_id}")
+        # Step 2: Generate — returns job_id (async)
+        log.info(f"Generating slides for paper_id={paper_id}")
         gen_resp = requests.post(
             f"{SLIDESCHOLAR_API}/api/generate",
-            json={"doc_id": doc_id, "talk_length": TALK_LENGTH, "density": 13},
-            timeout=180,
+            json={
+                "paper_id": paper_id,
+                "talk_length": TALK_LENGTH,
+                "include_speaker_notes": True,
+                "include_backup_slides": False,
+            },
+            timeout=30,
         )
         gen_resp.raise_for_status()
+        job_id = gen_resp.json().get("job_id")
+        if not job_id:
+            log.error(f"No job_id returned from /api/generate. Response: {gen_resp.json()}")
+            return None
 
-        content_type = gen_resp.headers.get("content-type", "")
-        if "application/vnd" in content_type or "octet-stream" in content_type:
-            return gen_resp.content
+        # Step 3: Poll /api/jobs/{job_id} until done
+        log.info(f"Polling job {job_id[:8]}...")
+        for attempt in range(60):  # up to 5 minutes
+            time.sleep(5)
+            poll_resp = requests.get(
+                f"{SLIDESCHOLAR_API}/api/jobs/{job_id}",
+                timeout=10,
+            )
+            poll_resp.raise_for_status()
+            poll_data = poll_resp.json()
+            status = poll_data.get("status")
+            log.info(f"  Job status: {status} (attempt {attempt + 1})")
 
-        gen_data = gen_resp.json()
-        if "download_url" in gen_data:
-            dl = requests.get(gen_data["download_url"], timeout=30)
-            dl.raise_for_status()
-            return dl.content
+            if status == "done":
+                download_url = poll_data.get("download_url")
+                if not download_url:
+                    log.error("No download_url in completed job")
+                    return None
+                # Step 4: Download the .pptx
+                dl_resp = requests.get(
+                    f"{SLIDESCHOLAR_API}{download_url}",
+                    timeout=30,
+                )
+                dl_resp.raise_for_status()
+                return dl_resp.content
 
-        log.error(f"Unexpected response from /api/generate: {gen_data}")
+            elif status == "error":
+                log.error(f"Job failed: {poll_data.get('detail')}")
+                return None
+
+        log.error("Job timed out after 5 minutes")
         return None
 
     except requests.exceptions.Timeout:
