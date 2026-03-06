@@ -19,6 +19,7 @@ export default function GenerationBanner() {
   const [status, setStatus] = useState<"polling" | "done" | "error">("polling");
   const [errorMsg, setErrorMsg] = useState("");
   const [dismissed, setDismissed] = useState(false);
+  const [now, setNow] = useState(Date.now());
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Check sessionStorage for active job on mount and pathname change
@@ -91,6 +92,13 @@ export default function GenerationBanner() {
     };
   }, [job, status]);
 
+  // Tick elapsed time
+  useEffect(() => {
+    if (status !== "polling") return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [status]);
+
   const handleViewPresentation = useCallback(() => {
     setDismissed(true);
     router.push("/preview");
@@ -101,14 +109,6 @@ export default function GenerationBanner() {
     setJob(null);
     sessionStorage.removeItem("activeJob");
   }, []);
-
-  // Tick elapsed time
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (status !== "polling") return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [status]);
 
   // Don't show on the generate page (it has its own UI) or if dismissed
   if (pathname === "/generate") return null;
