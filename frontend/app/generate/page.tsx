@@ -121,6 +121,11 @@ export default function GeneratePage() {
 
       try {
         const res = await fetch(`${apiUrl}/api/jobs/${jobId}`);
+        if (res.status === 404) {
+          clearInterval(timer);
+          setError("Session expired (server restarted). Please go back and re-upload your paper.");
+          return;
+        }
         if (!res.ok) return;
 
         const job = await res.json();
