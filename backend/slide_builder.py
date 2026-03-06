@@ -5,6 +5,10 @@ import os
 import re
 import tempfile
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+
 from PIL import Image as PILImage
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
@@ -13,6 +17,9 @@ from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.enum.shapes import MSO_SHAPE
 
 log = logging.getLogger("slidescholar")
+
+# Cache for image aspect ratios (path -> height/width)
+_image_ratio_cache: dict[str, float] = {}
 
 # --- Design constants ---
 SLIDE_WIDTH = Inches(13.333)
@@ -408,11 +415,15 @@ def _find_figure(figure_ref, figures):
 
 def _get_image_ratio(image_path: str) -> float:
     """Return height/width ratio of an image using PIL. Falls back to 0.75."""
+    if image_path in _image_ratio_cache:
+        return _image_ratio_cache[image_path]
     try:
         with PILImage.open(image_path) as img:
             w, h = img.size
             if w > 0:
-                return h / w
+                ratio = h / w
+                _image_ratio_cache[image_path] = ratio
+                return ratio
     except Exception:
         pass
     return 0.75  # default 4:3
@@ -621,10 +632,6 @@ def _add_table(slide, table_data, left, top, width, max_height=None,
 def _render_equation_image(latex_str: str, output_path: str, fontsize: int = 28) -> str | None:
     """Render a LaTeX equation to a transparent PNG via matplotlib."""
     try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
         clean = latex_str.strip().strip("$").strip()
         fig, ax = plt.subplots(figsize=(10, 1.5))
         ax.text(

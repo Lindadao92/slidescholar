@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, Future
 
 import anthropic
 from dotenv import load_dotenv
@@ -1275,9 +1276,9 @@ def plan_slides(
     )
 
     # Scale max_tokens for larger slide counts
-    plan_tokens = 8192 if slide_counts["main_slides"] <= 15 else 10240
+    plan_tokens = 5120 if slide_counts["main_slides"] <= 15 else 7168
     if slide_counts["main_slides"] > 30:
-        plan_tokens = 12288
+        plan_tokens = 9216
 
     plan_user = f"Here is the paper:\n\n{paper_summary}"
 
@@ -1293,33 +1294,64 @@ def plan_slides(
     if isinstance(slides, dict):
         slides = [slides]
 
-    # --- CALL 2: Speaker notes ---
-    if include_speaker_notes:
-        # Include visual info per slide so notes match actual content
-        slides_for_notes = []
-        for s in slides:
-            note_info = {
-                "slide_number": s.get("slide_number"),
-                "title": s.get("title"),
-                "content_type": s.get("content_type"),
-                "layout": s.get("layout"),
-                "bullet_points": s.get("bullet_points"),
-                "annotations": s.get("annotations"),
-                "has_figure": s.get("figure_reference") is not None,
-                "has_table": s.get("table_data") is not None,
-                "has_equation": s.get("equation_latex") is not None,
-                "has_key_number": s.get("key_number") is not None,
-            }
-            slides_for_notes.append(note_info)
+    # --- CALLS 2 & 3: Speaker notes + Backup slides (parallel) ---
+    # Both depend on the plan but are independent of each other.
+    notes_future: Future | None = None
+    backup_future: Future | None = None
 
-        slides_summary = json.dumps(slides_for_notes, indent=2)
-        notes_user = (
-            f"Paper title: {plan_data.get('talk_title', paper['title'])}\n\n"
-            f"Slides (with visual element flags):\n{slides_summary}\n\n"
-            f"Generate speaker notes for each slide. "
-            f"ONLY reference figures/tables/equations that are marked as present."
-        )
-        notes_data = _call_claude(client, SYSTEM_PROMPT_NOTES, notes_user)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        # Submit speaker notes call
+        if include_speaker_notes:
+            slides_for_notes = []
+            for s in slides:
+                note_info = {
+                    "slide_number": s.get("slide_number"),
+                    "title": s.get("title"),
+                    "content_type": s.get("content_type"),
+                    "layout": s.get("layout"),
+                    "bullet_points": s.get("bullet_points"),
+                    "annotations": s.get("annotations"),
+                    "has_figure": s.get("figure_reference") is not None,
+                    "has_table": s.get("table_data") is not None,
+                    "has_equation": s.get("equation_latex") is not None,
+                    "has_key_number": s.get("key_number") is not None,
+                }
+                slides_for_notes.append(note_info)
+
+            slides_summary = json.dumps(slides_for_notes, indent=2)
+            notes_user = (
+                f"Paper title: {plan_data.get('talk_title', paper['title'])}\n\n"
+                f"Slides (with visual element flags):\n{slides_summary}\n\n"
+                f"Generate speaker notes for each slide. "
+                f"ONLY reference figures/tables/equations that are marked as present."
+            )
+            notes_future = executor.submit(
+                _call_claude, client, SYSTEM_PROMPT_NOTES, notes_user
+            )
+
+        # Submit backup slides call
+        if include_backup_slides:
+            main_tables = [s.get("table_data", {}).get("caption", "")
+                           for s in slides if s.get("table_data")]
+            main_figures = [s["figure_reference"]
+                            for s in slides if s.get("figure_reference")]
+            backup_system = SYSTEM_PROMPT_BACKUP.format(
+                backup_slides=slide_counts["backup_slides"],
+            )
+            backup_user = (
+                f"Paper:\n\n{paper_summary}\n\n"
+                f"Main slides already include these tables: {main_tables}\n"
+                f"Main slides already include these figures: {main_figures}\n\n"
+                f"Generate backup slides for tables/figures NOT already covered, "
+                f"plus limitations and reproducibility."
+            )
+            backup_future = executor.submit(
+                _call_claude, client, backup_system, backup_user, 3072
+            )
+
+    # Collect speaker notes result
+    if notes_future is not None:
+        notes_data = notes_future.result()
 
         if isinstance(notes_data, dict):
             notes_list = notes_data.get("slides", notes_data.get("notes", []))
@@ -1351,28 +1383,11 @@ def plan_slides(
             slide.setdefault("transition", "")
             slide.setdefault("timing_cue", "")
 
-    # --- CALL 3: Backup slides ---
+    # Collect backup slides result
     backup_slides = []
-    if include_backup_slides:
-        # Tell backup prompt which tables/figures are already in main slides
-        main_tables = [s.get("table_data", {}).get("caption", "")
-                       for s in slides if s.get("table_data")]
-        main_figures = [s["figure_reference"]
-                        for s in slides if s.get("figure_reference")]
-        backup_system = SYSTEM_PROMPT_BACKUP.format(
-            backup_slides=slide_counts["backup_slides"],
-        )
-        backup_user = (
-            f"Paper:\n\n{paper_summary}\n\n"
-            f"Main slides already include these tables: {main_tables}\n"
-            f"Main slides already include these figures: {main_figures}\n\n"
-            f"Generate backup slides for tables/figures NOT already covered, "
-            f"plus limitations and reproducibility."
-        )
+    if backup_future is not None:
         try:
-            backup_data = _call_claude(
-                client, backup_system, backup_user, max_tokens=3072
-            )
+            backup_data = backup_future.result()
             if isinstance(backup_data, list):
                 backup_slides = backup_data
             elif isinstance(backup_data, dict):

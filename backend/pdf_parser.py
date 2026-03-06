@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 
 import fitz  # PyMuPDF
 
@@ -206,6 +207,18 @@ def _find_figure_captions_on_page(page_text: str) -> list[dict]:
 # Strategy 1  — raster extraction (PNG / JPEG embedded images)
 # ------------------------------------------------------------------
 
+def _save_image(img_bytes: bytes, filepath: str) -> None:
+    """Save image bytes to disk, converting CMYK → RGB if needed."""
+    try:
+        pix = fitz.Pixmap(img_bytes)
+        if pix.n - pix.alpha > 3:  # CMYK or other non-RGB
+            pix = fitz.Pixmap(fitz.csRGB, pix)
+        pix.save(filepath)
+    except Exception:
+        with open(filepath, "wb") as f:
+            f.write(img_bytes)
+
+
 def _extract_raster_figures(
     doc: fitz.Document,
     temp_dir: str,
@@ -214,6 +227,17 @@ def _extract_raster_figures(
     """Extract embedded raster images via ``page.get_images()``."""
     figures: list[dict] = []
     seen_xrefs: set[int] = set()
+
+    # Cache caption parsing per page (avoid redundant regex)
+    _page_captions_cache: dict[int, list[dict]] = {}
+
+    def _get_page_captions(page_num: int) -> list[dict]:
+        if page_num not in _page_captions_cache:
+            _page_captions_cache[page_num] = _find_figure_captions_on_page(pages_text[page_num])
+        return _page_captions_cache[page_num]
+
+    # Phase 1: Extract image data from doc (sequential — doc isn't thread-safe)
+    pending: list[tuple[dict, str, str]] = []  # (fig_info, filepath, img_bytes)
 
     for page_num in range(doc.page_count):
         page = doc[page_num]
@@ -242,21 +266,6 @@ def _extract_raster_figures(
             filename = f"fig_p{page_num}_{img_index}.{ext}"
             filepath = os.path.join(temp_dir, filename)
 
-            img_bytes = base_image["image"]
-
-            # Handle CMYK → RGB conversion
-            if base_image.get("colorspace", 0) == fitz.csRGB.n:
-                pass  # already RGB
-            try:
-                pix = fitz.Pixmap(img_bytes)
-                if pix.n - pix.alpha > 3:  # CMYK or other non-RGB
-                    pix = fitz.Pixmap(fitz.csRGB, pix)
-                pix.save(filepath)
-            except Exception:
-                # Fallback: write raw bytes
-                with open(filepath, "wb") as f:
-                    f.write(img_bytes)
-
             # Caption from nearby text blocks
             caption = ""
             try:
@@ -274,13 +283,13 @@ def _extract_raster_figures(
 
             # If caption search missed, try page text
             if fig_number is None:
-                page_caps = _find_figure_captions_on_page(pages_text[page_num])
+                page_caps = _get_page_captions(page_num)
                 if len(page_caps) == 1:
                     fig_number = page_caps[0]["number"]
                     if not caption:
                         caption = page_caps[0]["caption"]
 
-            figures.append({
+            fig_info = {
                 "path": filepath,
                 "filename": filename,
                 "page": page_num + 1,
@@ -290,7 +299,19 @@ def _extract_raster_figures(
                 "source": "raster",
                 "width": width,
                 "height": height,
-            })
+            }
+            pending.append((fig_info, filepath, base_image["image"]))
+
+    # Phase 2: Save images to disk in parallel (Pixmap conversion + I/O)
+    if pending:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            save_futures = [
+                executor.submit(_save_image, img_bytes, filepath)
+                for _, filepath, img_bytes in pending
+            ]
+            for future in save_futures:
+                future.result()  # propagate exceptions
+        figures = [info for info, _, _ in pending]
 
     return figures
 
@@ -360,6 +381,25 @@ def _extract_rendered_figures(
 
     rendered: list[dict] = []
 
+    # Cache: page_num -> pixmap, so we render each page at most once
+    _pixmap_cache: dict[int, fitz.Pixmap] = {}
+
+    def _get_page_pixmap(page_num: int) -> fitz.Pixmap | None:
+        if page_num in _pixmap_cache:
+            return _pixmap_cache[page_num]
+        try:
+            page = doc[page_num]
+            r = page.rect
+            crop_rect = fitz.Rect(r.x0, r.y0, r.x1, r.y0 + r.height * _CROP_RATIO)
+            pix = page.get_pixmap(dpi=_PAGE_RENDER_DPI, clip=crop_rect)
+            if pix.n - pix.alpha > 3:
+                pix = fitz.Pixmap(fitz.csRGB, pix)
+            _pixmap_cache[page_num] = pix
+            return pix
+        except Exception as exc:
+            log.warning("Page render failed for page %d: %s", page_num + 1, exc)
+            return None
+
     for page_num, text in enumerate(pages_text):
         page_1idx = page_num + 1
         captions = _find_figure_captions_on_page(text)
@@ -370,18 +410,32 @@ def _extract_rendered_figures(
             fig_num = cap["number"]
             if fig_num in covered_nums:
                 continue
-            # Also skip if a raster figure is already on this page
-            # (it was probably just not matched to this number yet)
             if page_1idx in covered_pages:
                 continue
 
-            fig = _render_page_figure(
-                doc, page_num, fig_num, cap["caption"], temp_dir,
-            )
-            if fig:
-                rendered.append(fig)
+            pix = _get_page_pixmap(page_num)
+            if not pix:
+                continue
+
+            try:
+                filename = f"fig_p{page_num}_v{fig_num}.png"
+                filepath = os.path.join(temp_dir, filename)
+                pix.save(filepath)
+                rendered.append({
+                    "path": filepath,
+                    "filename": filename,
+                    "page": page_1idx,
+                    "figure_number": fig_num,
+                    "figure_label": f"Figure {fig_num}",
+                    "caption": _clean_caption(cap["caption"]),
+                    "source": "page_render",
+                    "width": pix.width,
+                    "height": pix.height,
+                })
                 covered_nums.add(fig_num)
                 log.info("Rendered vector Figure %d from page %d", fig_num, page_1idx)
+            except Exception as exc:
+                log.warning("Failed saving Figure %d from page %d: %s", fig_num, page_1idx, exc)
 
     return rendered
 
