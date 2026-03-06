@@ -1012,7 +1012,79 @@ def _strip_code_fences(text: str) -> str:
     return text.strip()
 
 
-def _parse_json_response(text: str) -> dict | list:
+def _repair_truncated_json(text: str) -> str:
+    """Attempt to repair JSON truncated by max_tokens.
+
+    Strategy: find the last complete JSON object in a slides array,
+    then close all open brackets/braces.
+    """
+    cleaned = _strip_code_fences(text)
+
+    # Find the last complete "}" that could end a slide object
+    # by looking for "}," or "}" followed by whitespace/newline
+    last_complete = -1
+    depth = 0
+    in_string = False
+    escape_next = False
+
+    for i, c in enumerate(cleaned):
+        if escape_next:
+            escape_next = False
+            continue
+        if c == '\\':
+            escape_next = True
+            continue
+        if c == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+            if depth >= 1:  # closed a nested object (like a slide)
+                last_complete = i
+
+    if last_complete > 0:
+        # Truncate at last complete object, then close remaining brackets
+        truncated = cleaned[:last_complete + 1]
+        # Count remaining open brackets
+        open_braces = 0
+        open_brackets = 0
+        in_str = False
+        esc = False
+        for c in truncated:
+            if esc:
+                esc = False
+                continue
+            if c == '\\':
+                esc = True
+                continue
+            if c == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if c == '{':
+                open_braces += 1
+            elif c == '}':
+                open_braces -= 1
+            elif c == '[':
+                open_brackets += 1
+            elif c == ']':
+                open_brackets -= 1
+
+        closing = ']' * open_brackets + '}' * open_braces
+        repaired = truncated + closing
+        log.info("Repaired truncated JSON: kept %d/%d chars, added '%s'",
+                 last_complete + 1, len(cleaned), closing)
+        return repaired
+
+    return text  # can't repair, return as-is
+
+
+
     """Parse a JSON response from Claude, handling common quirks."""
     cleaned = _strip_code_fences(text)
     try:
@@ -1105,6 +1177,10 @@ def _call_claude(
                 messages=[{"role": "user", "content": user}],
             )
             text = response.content[0].text
+            if response.stop_reason == "max_tokens":
+                log.warning("Response truncated (max_tokens=%d, model=%s). "
+                            "Attempting to repair JSON.", max_tokens, use_model)
+                text = _repair_truncated_json(text)
             return _parse_json_response(text)
 
         except anthropic.APIStatusError as exc:
@@ -1278,10 +1354,11 @@ def plan_slides(
         seconds_per_slide=seconds_per_slide,
     )
 
-    # Scale max_tokens for larger slide counts
-    plan_tokens = 5120 if slide_counts["main_slides"] <= 15 else 7168
-    if slide_counts["main_slides"] > 30:
-        plan_tokens = 9216
+    # Scale max_tokens for larger slide counts (~400 tokens per slide)
+    n_main = slide_counts["main_slides"]
+    plan_tokens = max(5120, n_main * 400)
+    if plan_tokens > 16384:
+        plan_tokens = 16384
 
     plan_user = f"Here is the paper:\n\n{paper_summary}"
 
