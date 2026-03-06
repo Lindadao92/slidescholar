@@ -44,6 +44,11 @@ ARXIV_FEEDS = [
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 
 
+def clean_text(s):
+    """Strip non-ASCII artifacts so emails render cleanly."""
+    return s.replace('\xa0', ' ').replace('\u2009', ' ').encode('ascii', 'ignore').decode('ascii').strip()
+
+
 def parse_arxiv_id(raw_id: str) -> str:
     """Parse arxiv ID from various formats."""
     if "/abs/" in raw_id:
@@ -193,6 +198,8 @@ def generate_slides(pdf_bytes: bytes, title: str):
 def send_email(to_email: str, author_first_name: str, paper_title: str,
                paper_url: str, pptx_bytes: bytes) -> bool:
     """Send cold email with .pptx attached."""
+    paper_title = clean_text(paper_title)
+    author_first_name = clean_text(author_first_name)
     subject = "I turned your paper into slides — free to use"
     safe_title = re.sub(r'[^\w\s-]', '', paper_title[:50]).strip().replace(' ', '_')
     filename = f"SlideScholar_{safe_title}.pptx"
@@ -253,7 +260,7 @@ def run():
 
     for paper in papers:
         log.info(f"Processing: {paper['title'][:70]}")
-        paper['title'] = paper['title'].replace('\xa0', ' ').encode('ascii', 'ignore').decode('ascii')
+        paper['title'] = clean_text(paper['title'])
 
         try:
             pdf_resp = requests.get(paper["pdf_url"], timeout=30)
