@@ -106,8 +106,9 @@ export default function ExamplePage() {
               </span>
             </div>
             <iframe
-              src="/sample-paper.pdf"
+              src="/sample-paper.pdf#page=1"
               className="h-full w-full border-0"
+              style={{ minHeight: "80vh" }}
               title="Sample research paper PDF"
             />
           </div>
@@ -129,8 +130,9 @@ export default function ExamplePage() {
               </span>
             </div>
             <iframe
-              src="/sample-presentation.pdf"
+              src="/sample-presentation.pdf#zoom=page-fit"
               className="h-full w-full border-0"
+              style={{ minHeight: "80vh" }}
               title="Generated presentation slides"
             />
           </div>
@@ -146,8 +148,9 @@ export default function ExamplePage() {
             </span>
           </div>
           <iframe
-            src={showPaper ? "/sample-paper.pdf" : "/sample-presentation.pdf"}
+            src={showPaper ? "/sample-paper.pdf#page=1" : "/sample-presentation.pdf#zoom=page-fit"}
             className="h-full w-full border-0"
+            style={{ minHeight: "80vh" }}
             title={showPaper ? "Sample research paper PDF" : "Generated presentation slides"}
           />
         </div>
