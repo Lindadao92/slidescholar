@@ -15,6 +15,7 @@ import json
 import time
 import smtplib
 import logging
+import traceback
 import requests
 from email.message import EmailMessage
 
@@ -294,6 +295,7 @@ Paper: {paper_url}
 
     except Exception as e:
         log.error(f"Failed to send email to {to_email}: {e}")
+        log.error(traceback.format_exc())
         return False
 
 
