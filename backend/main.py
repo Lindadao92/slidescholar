@@ -40,7 +40,8 @@ log = logging.getLogger("slidescholar")
 # --- App ---
 app = FastAPI(title="SlideScholar", version="0.1.0")
 
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+allowed_origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
+log.info("CORS allowed origins: %s", allowed_origins)
 
 app.add_middleware(
     CORSMiddleware,
