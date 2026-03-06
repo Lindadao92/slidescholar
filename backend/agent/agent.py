@@ -16,9 +16,7 @@ import time
 import smtplib
 import logging
 import requests
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
+from email.message import EmailMessage
 
 import feedparser
 import fitz  # PyMuPDF
@@ -280,17 +278,12 @@ Paper: {paper_url}
 """
 
     try:
-        msg = MIMEMultipart()
+        msg = EmailMessage()
         msg["From"] = GMAIL_ADDRESS
         msg["To"] = to_email
         msg["Subject"] = subject
-        body = clean_text(body)
-        log.info(f"DEBUG body repr full: {repr(body)}")
-        msg.attach(MIMEText(body, "plain", "utf-8"))
-
-        attachment = MIMEApplication(pptx_bytes, Name=filename)
-        attachment["Content-Disposition"] = f'attachment; filename="{filename}"'
-        msg.attach(attachment)
+        msg.set_content(body)
+        msg.add_attachment(pptx_bytes, maintype="application", subtype="octet-stream", filename=filename)
 
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
