@@ -1084,7 +1084,7 @@ def _repair_truncated_json(text: str) -> str:
     return text  # can't repair, return as-is
 
 
-
+def _parse_json_response(text: str) -> dict | list:
     """Parse a JSON response from Claude, handling common quirks."""
     cleaned = _strip_code_fences(text)
     try:
