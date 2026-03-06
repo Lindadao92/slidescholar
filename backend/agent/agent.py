@@ -11,6 +11,7 @@ Daily agent that:
 
 import os
 import re
+import json
 import time
 import smtplib
 import logging
@@ -29,6 +30,7 @@ GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 PAPERS_PER_RUN     = int(os.getenv("PAPERS_PER_RUN", "5"))
 TALK_LENGTH        = os.getenv("TALK_LENGTH", "conference")
 LOG_LEVEL          = os.getenv("LOG_LEVEL", "INFO")
+SENT_LOG_PATH      = os.getenv("SENT_LOG_PATH", os.path.join(os.path.dirname(__file__), "sent_papers.json"))
 
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -47,6 +49,21 @@ EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 def clean_text(s):
     """Strip non-ASCII artifacts so emails render cleanly."""
     return s.replace('\xa0', ' ').replace('\u2009', ' ').encode('ascii', 'ignore').decode('ascii').strip()
+
+
+def load_sent_ids() -> set:
+    """Load the set of already-processed arXiv IDs from disk."""
+    try:
+        with open(SENT_LOG_PATH, "r") as f:
+            return set(json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+def save_sent_ids(sent_ids: set):
+    """Persist processed arXiv IDs to disk."""
+    with open(SENT_LOG_PATH, "w") as f:
+        json.dump(sorted(sent_ids), f)
 
 
 def parse_arxiv_id(raw_id: str) -> str:
@@ -254,11 +271,17 @@ def guess_first_name(email: str) -> str:
 def run():
     log.info("=== SlideScholar arXiv Agent starting ===")
     papers = fetch_arxiv_papers(PAPERS_PER_RUN)
+    sent_ids = load_sent_ids()
+    log.info(f"Loaded {len(sent_ids)} previously sent paper IDs")
 
     sent_count = 0
     skip_count = 0
 
     for paper in papers:
+        if paper["id"] in sent_ids:
+            log.info(f"Already sent, skipping: {paper['id']}")
+            skip_count += 1
+            continue
         log.info(f"Processing: {paper['title'][:70]}")
         paper['title'] = clean_text(paper['title'])
 
@@ -287,6 +310,10 @@ def run():
         primary_email = emails[0]
         first_name = guess_first_name(primary_email)
 
+        log.info(f"DEBUG title repr: {repr(paper['title'])}")
+        log.info(f"DEBUG author repr: {repr(first_name)}")
+        log.info(f"DEBUG url repr: {repr(paper['abs_url'])}")
+
         success = send_email(
             to_email=primary_email,
             author_first_name=first_name,
@@ -296,6 +323,8 @@ def run():
         )
         if success:
             sent_count += 1
+            sent_ids.add(paper["id"])
+            save_sent_ids(sent_ids)
 
         time.sleep(5)
 
