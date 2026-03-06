@@ -27,7 +27,8 @@ jobs:
         uses: actions/cache@v3
         with:
           path: backend/agent/sent_papers.json
-          key: sent-papers-cache
+          key: sent-papers-${{ github.run_id }}
+          restore-keys: sent-papers-
 
       - name: Run agent
         env:
@@ -42,4 +43,4 @@ jobs:
         uses: actions/cache@v3
         with:
           path: backend/agent/sent_papers.json
-          key: sent-papers-cache
+          key: sent-papers-${{ github.run_id }}
