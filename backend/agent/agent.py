@@ -242,6 +242,7 @@ Paper: {paper_url}
         msg["From"] = GMAIL_ADDRESS
         msg["To"] = to_email
         msg["Subject"] = subject
+        body = clean_text(body)
         msg.attach(MIMEText(body, "plain", "utf-8"))
 
         attachment = MIMEApplication(pptx_bytes, Name=filename)
@@ -261,11 +262,14 @@ Paper: {paper_url}
 
 
 def guess_first_name(email: str) -> str:
-    """Best-effort first name from email address."""
+    """Best-effort first name from email address. Returns 'there' if it looks like an ID rather than a name."""
     local = email.split("@")[0]
     parts = re.split(r'[._\-]', local)
     name = parts[0] if len(parts) >= 2 else local
-    return name.capitalize() if len(name) > 1 else "there"
+    # Reject if too short, contains digits, or is all caps with digits (e.g. "da579", "jx42")
+    if len(name) <= 1 or re.search(r'\d', name) or not name.isalpha():
+        return "there"
+    return name.capitalize()
 
 
 def run():
