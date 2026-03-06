@@ -1,19 +1,38 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import Link from "next/link";
-
-const TOTAL_SLIDES = 41;
-const slides = Array.from(
-  { length: TOTAL_SLIDES },
-  (_, i) => `/example-slides/slide-${i + 1}.png`
-);
 
 type View = "side-by-side" | "paper" | "slides";
 
 export default function ExamplePage() {
-  const [currentSlide, setCurrentSlide] = useState(0);
   const [view, setView] = useState<View>("side-by-side");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [leftWidth, setLeftWidth] = useState(50);
+  const isDragging = useRef(false);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isDragging.current || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const pct = ((e.clientX - rect.left) / rect.width) * 100;
+    setLeftWidth(Math.min(75, Math.max(25, pct)));
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    isDragging.current = false;
+    document.removeEventListener("mousemove", handleMouseMove);
+    document.removeEventListener("mouseup", handleMouseUp);
+  }, [handleMouseMove]);
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      isDragging.current = true;
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    },
+    [handleMouseMove, handleMouseUp]
+  );
 
   const showPaper = view === "side-by-side" || view === "paper";
   const showSlides = view === "side-by-side" || view === "slides";
@@ -69,109 +88,70 @@ export default function ExamplePage() {
         </div>
       </header>
 
-      {/* Split view */}
-      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col lg:flex-row">
-        {/* LEFT: PDF */}
-        {showPaper && (
+      {/* Content */}
+      {view === "side-by-side" ? (
+        <div
+          ref={containerRef}
+          className="flex flex-1 overflow-hidden"
+          style={{ height: "calc(100vh - 7rem)" }}
+        >
+          {/* Left: Paper PDF */}
           <div
-            className={`flex flex-col border-b border-gray-200 lg:border-b-0 ${
-              view === "side-by-side"
-                ? "lg:w-1/2 lg:border-r"
-                : "w-full"
-            }`}
+            style={{ width: `${leftWidth}%` }}
+            className="flex h-full flex-col overflow-hidden"
           >
             <div className="border-b border-gray-100 bg-gray-50 px-4 py-2">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                 Original Paper
               </span>
             </div>
-            <div className="min-h-[50vh] flex-1 lg:min-h-0">
-              <iframe
-                src="/sample-paper.pdf"
-                className="h-full w-full"
-                title="Sample research paper PDF"
-              />
-            </div>
+            <iframe
+              src="/sample-paper.pdf"
+              className="h-full w-full border-0"
+              title="Sample research paper PDF"
+            />
           </div>
-        )}
 
-        {/* Divider (side-by-side only, desktop) */}
-        {view === "side-by-side" && (
-          <div className="hidden w-1 cursor-col-resize bg-gray-200 hover:bg-accent/40 lg:block" />
-        )}
-
-        {/* RIGHT: Slides */}
-        {showSlides && (
+          {/* Draggable divider */}
           <div
-            className={`flex flex-col ${
-              view === "side-by-side" ? "lg:w-1/2" : "w-full"
-            }`}
+            onMouseDown={handleMouseDown}
+            className="w-1 shrink-0 cursor-col-resize bg-gray-300 transition-colors hover:bg-blue-400"
+          />
+
+          {/* Right: Slides PDF */}
+          <div
+            style={{ width: `${100 - leftWidth}%` }}
+            className="flex h-full flex-col overflow-hidden"
           >
-            <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2">
+            <div className="border-b border-gray-100 bg-gray-50 px-4 py-2">
               <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                 Generated Slides
               </span>
-              <a
-                href="/sample-presentation.pptx"
-                download
-                className="flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 transition-colors hover:border-accent hover:text-accent"
-                title="Download .pptx"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3"
-                  />
-                </svg>
-                .pptx
-              </a>
             </div>
-
-            <div className="flex flex-1 flex-col">
-              {/* Slide display */}
-              <div className="flex flex-1 items-center justify-center bg-gray-50 p-2 sm:p-4">
-                <img
-                  src={slides[currentSlide]}
-                  alt={`Slide ${currentSlide + 1}`}
-                  className="w-full rounded-lg border border-gray-200 shadow-md"
-                  style={{ maxHeight: "calc(100vh - 12rem)" }}
-                />
-              </div>
-
-              {/* Navigation */}
-              <div className="flex items-center justify-center gap-4 border-t border-gray-100 px-4 py-3">
-                <button
-                  onClick={() => setCurrentSlide((s) => Math.max(0, s - 1))}
-                  disabled={currentSlide === 0}
-                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  &larr; Prev
-                </button>
-                <span className="text-sm text-gray-500">
-                  {currentSlide + 1} / {slides.length}
-                </span>
-                <button
-                  onClick={() =>
-                    setCurrentSlide((s) => Math.min(slides.length - 1, s + 1))
-                  }
-                  disabled={currentSlide === slides.length - 1}
-                  className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Next &rarr;
-                </button>
-              </div>
-            </div>
+            <iframe
+              src="/sample-presentation.pdf"
+              className="h-full w-full border-0"
+              title="Generated presentation slides"
+            />
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div
+          className="flex flex-1 flex-col overflow-hidden"
+          style={{ height: "calc(100vh - 7rem)" }}
+        >
+          <div className="border-b border-gray-100 bg-gray-50 px-4 py-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+              {showPaper ? "Original Paper" : "Generated Slides"}
+            </span>
+          </div>
+          <iframe
+            src={showPaper ? "/sample-paper.pdf" : "/sample-presentation.pdf"}
+            className="h-full w-full border-0"
+            title={showPaper ? "Sample research paper PDF" : "Generated presentation slides"}
+          />
+        </div>
+      )}
 
       {/* CTA */}
       <div className="border-t border-gray-100 bg-gray-50/60 px-4 py-8 text-center">
