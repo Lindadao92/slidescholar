@@ -21,7 +21,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r agent/requirements.txt
+        run: pip install -r backend/agent/requirements.txt
 
       - name: Run agent
         env:
@@ -30,4 +30,4 @@ jobs:
           GMAIL_APP_PASSWORD:   ${{ secrets.GMAIL_APP_PASSWORD }}
           PAPERS_PER_RUN:       "5"
           TALK_LENGTH:          "15-min"
-        run: python agent/agent.py
+        run: python backend/agent/agent.py
