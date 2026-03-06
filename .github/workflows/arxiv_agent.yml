@@ -1,0 +1,33 @@
+name: SlideScholar arXiv Agent
+
+on:
+  schedule:
+    # Runs every day at 9:00 AM UTC
+    - cron: "0 9 * * *"
+  workflow_dispatch:  # allows manual trigger from GitHub UI
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r agent/requirements.txt
+
+      - name: Run agent
+        env:
+          SLIDESCHOLAR_API_URL: ${{ secrets.SLIDESCHOLAR_API_URL }}
+          GMAIL_ADDRESS:        ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD:   ${{ secrets.GMAIL_APP_PASSWORD }}
+          PAPERS_PER_RUN:       "5"
+          TALK_LENGTH:          "15-min"
+        run: python agent/agent.py
