@@ -108,150 +108,422 @@ export default function Home() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center px-4 py-16 sm:py-24">
-      {/* Header */}
-      <header className="mb-12 text-center">
-        <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-          Slide<span className="text-accent">Scholar</span>
-        </h1>
-        <p className="mt-3 text-lg text-gray-500">
-          Paper to Talk in 60 Seconds
-        </p>
-      </header>
-
-      {/* Upload zone */}
-      <div className="w-full max-w-xl">
-        <label
-          htmlFor="file-upload"
-          onDragEnter={handleDrag}
-          onDragOver={handleDrag}
-          onDragLeave={handleDrag}
-          onDrop={handleDrop}
-          className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-14 transition-colors ${
-            dragActive
-              ? "border-accent bg-blue-50"
-              : "border-gray-300 hover:border-accent hover:bg-gray-50"
-          }`}
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="mb-3 h-10 w-10 text-gray-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16"
-            />
-          </svg>
-          <span className="text-sm font-medium text-gray-600">
-            Drag & drop a PDF here, or{" "}
-            <span className="text-accent underline">browse</span>
-          </span>
-          <span className="mt-1 text-xs text-gray-400">
-            PDF up to 50 MB
-          </span>
-          <input
-            id="file-upload"
-            type="file"
-            accept=".pdf,application/pdf"
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-        </label>
-
-        {/* File info */}
-        {file && (
-          <div className="mt-3 flex items-center justify-between rounded-lg bg-blue-50 px-4 py-2 text-sm">
-            <span className="truncate font-medium text-accent">
-              {file.name}
-            </span>
-            <button
-              onClick={() => setFile(null)}
-              className="ml-3 shrink-0 text-gray-400 hover:text-gray-600"
-            >
-              &times;
-            </button>
-          </div>
-        )}
-
-        {/* Divider */}
-        <div className="my-6 flex items-center gap-3">
-          <div className="h-px flex-1 bg-gray-200" />
-          <span className="text-xs font-medium text-gray-400">OR</span>
-          <div className="h-px flex-1 bg-gray-200" />
+    <div className="min-h-screen bg-white">
+      {/* ================================================================ */}
+      {/*  HERO                                                            */}
+      {/* ================================================================ */}
+      <section className="px-4 pt-16 pb-12 sm:pt-24 sm:pb-16">
+        <div className="mx-auto max-w-4xl text-center">
+          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
+            Turn your research paper into conference slides
+            <span className="text-accent"> — in 60 seconds</span>
+          </h1>
+          <p className="mx-auto mt-5 max-w-2xl text-lg text-gray-500">
+            Assertion-evidence format. Figures extracted. Speaker notes included.
+            No signup needed.
+          </p>
         </div>
 
-        {/* ArXiv URL input */}
-        <input
-          type="url"
-          placeholder="Paste an arXiv URL (e.g. https://arxiv.org/abs/2301.00001)"
-          value={arxivUrl}
-          onChange={handleArxivChange}
-          className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm outline-none transition-colors placeholder:text-gray-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
-        />
+        {/* Slide thumbnails preview */}
+        <div className="mx-auto mt-12 flex max-w-3xl items-center justify-center gap-4 px-4 sm:gap-6">
+          <MiniSlide rotate={-6} className="hidden sm:block">
+            <div className="mb-1 h-1 w-8 rounded bg-accent" />
+            <div className="h-1.5 w-20 rounded bg-gray-800" />
+            <div className="mt-auto text-center">
+              <div className="mx-auto h-1 w-14 rounded bg-gray-300" />
+              <div className="mx-auto mt-0.5 h-0.5 w-10 rounded bg-gray-200" />
+            </div>
+          </MiniSlide>
 
-        {/* Error */}
-        {error && (
-          <p className="mt-3 text-sm text-red-600">{error}</p>
-        )}
+          <MiniSlide rotate={-2}>
+            <div className="h-1 w-16 rounded bg-gray-800" />
+            <div className="mt-1 flex flex-1 gap-1.5">
+              <div className="flex w-1/2 flex-col gap-0.5">
+                <div className="h-0.5 w-full rounded bg-gray-300" />
+                <div className="h-0.5 w-4/5 rounded bg-gray-300" />
+                <div className="h-0.5 w-full rounded bg-gray-300" />
+              </div>
+              <div className="w-1/2 rounded bg-blue-100" />
+            </div>
+          </MiniSlide>
 
-        {/* Submit */}
-        <button
-          onClick={handleSubmit}
-          disabled={!hasInput || loading}
-          className="mt-6 flex w-full items-center justify-center rounded-xl bg-accent py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {loading ? (
-            <>
-              <svg
-                className="mr-2 h-4 w-4 animate-spin"
-                viewBox="0 0 24 24"
-                fill="none"
+          <MiniSlide rotate={1} highlight>
+            <div className="h-1 w-14 rounded bg-gray-800" />
+            <div className="mt-1 flex-1 rounded border border-gray-200">
+              <div className="flex gap-px border-b border-gray-200 bg-accent/10 px-1 py-0.5">
+                <div className="h-0.5 w-4 rounded bg-accent/40" />
+                <div className="h-0.5 w-4 rounded bg-accent/40" />
+                <div className="h-0.5 w-4 rounded bg-accent/40" />
+              </div>
+              {[0, 1, 2].map((r) => (
+                <div key={r} className={`flex gap-px px-1 py-0.5 ${r % 2 ? "bg-gray-50" : ""}`}>
+                  <div className="h-0.5 w-4 rounded bg-gray-300" />
+                  <div className="h-0.5 w-4 rounded bg-gray-300" />
+                  <div className="h-0.5 w-4 rounded bg-gray-300" />
+                </div>
+              ))}
+            </div>
+          </MiniSlide>
+
+          <MiniSlide rotate={4}>
+            <div className="h-1 w-12 rounded bg-gray-800" />
+            <div className="flex flex-1 flex-col items-center justify-center">
+              <span className="text-lg font-bold leading-none text-accent">3.2x</span>
+              <div className="mt-0.5 h-0.5 w-10 rounded bg-gray-300" />
+            </div>
+          </MiniSlide>
+
+          <MiniSlide rotate={7} className="hidden sm:block">
+            <div className="h-1 w-16 rounded bg-gray-800" />
+            <div className="mt-1 flex flex-1 flex-col gap-0.5">
+              <div className="flex items-start gap-1">
+                <div className="mt-0.5 h-0.5 w-0.5 shrink-0 rounded-full bg-accent" />
+                <div className="h-0.5 w-full rounded bg-gray-300" />
+              </div>
+              <div className="flex items-start gap-1">
+                <div className="mt-0.5 h-0.5 w-0.5 shrink-0 rounded-full bg-accent" />
+                <div className="h-0.5 w-4/5 rounded bg-gray-300" />
+              </div>
+              <div className="flex items-start gap-1">
+                <div className="mt-0.5 h-0.5 w-0.5 shrink-0 rounded-full bg-accent" />
+                <div className="h-0.5 w-full rounded bg-gray-300" />
+              </div>
+            </div>
+          </MiniSlide>
+        </div>
+      </section>
+
+      {/* ================================================================ */}
+      {/*  FEATURES                                                        */}
+      {/* ================================================================ */}
+      <section className="border-t border-gray-100 bg-gray-50/60 px-4 py-16">
+        <div className="mx-auto max-w-4xl">
+          <h2 className="text-center text-sm font-semibold uppercase tracking-wide text-gray-400">
+            What you get
+          </h2>
+          <div className="mt-8 grid gap-6 sm:grid-cols-2">
+            <FeatureCard
+              title="Assertion-Evidence Titles"
+              desc="Every slide makes a claim, not a topic label. The format top researchers use."
+            />
+            <FeatureCard
+              title="Your Figures, Properly Placed"
+              desc="Extracted from your PDF with correct aspect ratios and captions."
+            />
+            <FeatureCard
+              title="Editable Tables"
+              desc="Paper tables become clean PowerPoint tables with key results bolded."
+            />
+            <FeatureCard
+              title="Speaker Notes with Timing"
+              desc="Conversational notes with [pause] markers and per-slide time budgets."
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ================================================================ */}
+      {/*  HOW IT WORKS                                                    */}
+      {/* ================================================================ */}
+      <section className="px-4 py-16">
+        <div className="mx-auto max-w-3xl">
+          <h2 className="text-center text-sm font-semibold uppercase tracking-wide text-gray-400">
+            How it works
+          </h2>
+          <div className="mt-8 grid gap-8 sm:grid-cols-3">
+            <Step number="1" title="Upload your paper" desc="PDF or arXiv URL" />
+            <Step number="2" title="Pick your talk format" desc="5 / 15 / 45 minutes" />
+            <Step number="3" title="Edit inline & download" desc="Tweak any slide, then export .pptx" />
+          </div>
+          <p className="mt-6 text-center text-sm font-medium text-accent">
+            Total time: under 2 minutes
+          </p>
+        </div>
+      </section>
+
+      {/* ================================================================ */}
+      {/*  UPLOAD BOX (existing functionality, unchanged)                  */}
+      {/* ================================================================ */}
+      <section className="border-t border-gray-100 bg-gray-50/60 px-4 py-16">
+        <div className="mx-auto max-w-xl">
+          <h2 className="mb-8 text-center text-2xl font-bold tracking-tight sm:text-3xl">
+            Try it now
+          </h2>
+
+          <label
+            htmlFor="file-upload"
+            onDragEnter={handleDrag}
+            onDragOver={handleDrag}
+            onDragLeave={handleDrag}
+            onDrop={handleDrop}
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed px-6 py-14 transition-colors ${
+              dragActive
+                ? "border-accent bg-blue-50"
+                : "border-gray-300 bg-white hover:border-accent hover:bg-gray-50"
+            }`}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="mb-3 h-10 w-10 text-gray-400"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.5}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16"
+              />
+            </svg>
+            <span className="text-sm font-medium text-gray-600">
+              Drag & drop a PDF here, or{" "}
+              <span className="text-accent underline">browse</span>
+            </span>
+            <span className="mt-1 text-xs text-gray-400">
+              PDF up to 50 MB
+            </span>
+            <input
+              id="file-upload"
+              type="file"
+              accept=".pdf,application/pdf"
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+          </label>
+
+          {/* File info */}
+          {file && (
+            <div className="mt-3 flex items-center justify-between rounded-lg bg-blue-50 px-4 py-2 text-sm">
+              <span className="truncate font-medium text-accent">
+                {file.name}
+              </span>
+              <button
+                onClick={() => setFile(null)}
+                className="ml-3 shrink-0 text-gray-400 hover:text-gray-600"
               >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                />
-              </svg>
-              Processing...
-            </>
-          ) : (
-            "Continue \u2192"
+                &times;
+              </button>
+            </div>
           )}
-        </button>
-      </div>
 
-      {/* Feature bullets */}
-      <ul className="mt-16 grid max-w-xl gap-4 text-sm text-gray-500 sm:grid-cols-3">
-        <li className="flex flex-col items-center text-center">
-          <span className="mb-1 text-2xl">&#128196;</span>
-          <span className="font-medium text-foreground">Upload PDF</span>
-          <span className="mt-0.5">or paste an arXiv link</span>
-        </li>
-        <li className="flex flex-col items-center text-center">
-          <span className="mb-1 text-2xl">&#9889;</span>
-          <span className="font-medium text-foreground">AI-Powered</span>
-          <span className="mt-0.5">extracts key insights</span>
-        </li>
-        <li className="flex flex-col items-center text-center">
-          <span className="mb-1 text-2xl">&#127908;</span>
-          <span className="font-medium text-foreground">Talk-Ready</span>
-          <span className="mt-0.5">slides in 60 seconds</span>
-        </li>
-      </ul>
+          {/* Divider */}
+          <div className="my-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-gray-200" />
+            <span className="text-xs font-medium text-gray-400">OR</span>
+            <div className="h-px flex-1 bg-gray-200" />
+          </div>
+
+          {/* ArXiv URL input */}
+          <input
+            type="url"
+            placeholder="Paste an arXiv URL (e.g. https://arxiv.org/abs/2301.00001)"
+            value={arxivUrl}
+            onChange={handleArxivChange}
+            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm outline-none transition-colors placeholder:text-gray-400 focus:border-accent focus:ring-2 focus:ring-accent/20"
+          />
+
+          {/* Error */}
+          {error && (
+            <p className="mt-3 text-sm text-red-600">{error}</p>
+          )}
+
+          {/* Submit */}
+          <button
+            onClick={handleSubmit}
+            disabled={!hasInput || loading}
+            className="mt-6 flex w-full items-center justify-center rounded-xl bg-accent py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? (
+              <>
+                <svg
+                  className="mr-2 h-4 w-4 animate-spin"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                  />
+                </svg>
+                Processing...
+              </>
+            ) : (
+              "Continue \u2192"
+            )}
+          </button>
+
+          {/* Sub-CTA */}
+          <p className="mt-4 text-center text-xs text-gray-400">
+            Free &middot; No signup &middot; 3 presentations per month
+          </p>
+          <p className="mt-2 text-center">
+            <a href="#" className="text-xs font-medium text-accent hover:underline">
+              See example output &rarr;
+            </a>
+          </p>
+        </div>
+      </section>
+
+      {/* ================================================================ */}
+      {/*  COMPARISON TABLE                                                */}
+      {/* ================================================================ */}
+      <section className="px-4 py-16">
+        <div className="mx-auto max-w-4xl">
+          <h2 className="text-center text-sm font-semibold uppercase tracking-wide text-gray-400">
+            How SlideScholar compares
+          </h2>
+          <div className="mt-8 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left">
+                  <th className="py-3 pr-4 font-medium text-gray-500">Feature</th>
+                  <th className="px-4 py-3 font-semibold text-accent">SlideScholar</th>
+                  <th className="px-4 py-3 font-medium text-gray-500">ChatGPT</th>
+                  <th className="px-4 py-3 font-medium text-gray-500">Gamma</th>
+                  <th className="px-4 py-3 font-medium text-gray-500">SlidesAI</th>
+                </tr>
+              </thead>
+              <tbody className="text-gray-600">
+                <CompareRow feature="Paper structure awareness" ss gamma slides chatgpt={false} />
+                <CompareRow feature="Figure extraction" ss chatgpt={false} gamma={false} slides={false} />
+                <CompareRow feature="Editable tables" ss chatgpt={false} gamma={false} slides={false} />
+                <CompareRow feature="Speaker notes" ss chatgpt gamma={false} slides={false} />
+                <CompareRow feature="Talk length adaptation" ss chatgpt={false} gamma={false} slides={false} />
+                <CompareRow feature=".pptx export" ss chatgpt={false} gamma slides />
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {/* ================================================================ */}
+      {/*  FAQ                                                             */}
+      {/* ================================================================ */}
+      <section className="border-t border-gray-100 bg-gray-50/60 px-4 py-16">
+        <div className="mx-auto max-w-2xl">
+          <h2 className="text-center text-sm font-semibold uppercase tracking-wide text-gray-400">
+            FAQ
+          </h2>
+          <dl className="mt-8 space-y-6">
+            <FaqItem
+              q="Is my paper safe?"
+              a="Yes. Files are deleted after 24 hours and are never used for training."
+            />
+            <FaqItem
+              q="Can I edit slides before downloading?"
+              a="Yes. Full inline editing — titles, bullets, tables, annotations, speaker notes — all editable in the browser before you download."
+            />
+            <FaqItem
+              q="What format do I get?"
+              a=".pptx — works in PowerPoint, Google Slides, and Keynote."
+            />
+            <FaqItem
+              q="Is it free?"
+              a="3 free presentations per month, no signup required."
+            />
+          </dl>
+        </div>
+      </section>
+
+      {/* ================================================================ */}
+      {/*  FOOTER                                                          */}
+      {/* ================================================================ */}
+      <footer className="border-t border-gray-100 px-4 py-8 text-center text-xs text-gray-400">
+        Slide<span className="font-semibold text-accent">Scholar</span> &middot; Built for researchers, by researchers.
+      </footer>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Sub-components                                                     */
+/* ------------------------------------------------------------------ */
+
+function MiniSlide({
+  children,
+  rotate = 0,
+  highlight = false,
+  className = "",
+}: {
+  children: React.ReactNode;
+  rotate?: number;
+  highlight?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`flex aspect-video w-28 flex-col rounded-lg border bg-white p-2 shadow-md sm:w-36 sm:p-3 ${
+        highlight ? "border-accent/30 shadow-lg ring-1 ring-accent/10" : "border-gray-200"
+      } ${className}`}
+      style={{ transform: `rotate(${rotate}deg)` }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function FeatureCard({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-5">
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <p className="mt-1 text-sm text-gray-500">{desc}</p>
+    </div>
+  );
+}
+
+function Step({ number, title, desc }: { number: string; title: string; desc: string }) {
+  return (
+    <div className="flex flex-col items-center text-center">
+      <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-sm font-bold text-white">
+        {number}
+      </span>
+      <h3 className="mt-3 text-sm font-semibold text-foreground">{title}</h3>
+      <p className="mt-1 text-xs text-gray-500">{desc}</p>
+    </div>
+  );
+}
+
+function CompareRow({
+  feature,
+  ss = false,
+  chatgpt = false,
+  gamma = false,
+  slides = false,
+}: {
+  feature: string;
+  ss?: boolean;
+  chatgpt?: boolean;
+  gamma?: boolean;
+  slides?: boolean;
+}) {
+  const yes = <span className="text-green-600">&#10003;</span>;
+  const no = <span className="text-gray-300">&#10005;</span>;
+  return (
+    <tr className="border-b border-gray-100">
+      <td className="py-2.5 pr-4 font-medium">{feature}</td>
+      <td className="px-4 py-2.5 text-center">{ss ? yes : no}</td>
+      <td className="px-4 py-2.5 text-center">{chatgpt ? yes : no}</td>
+      <td className="px-4 py-2.5 text-center">{gamma ? yes : no}</td>
+      <td className="px-4 py-2.5 text-center">{slides ? yes : no}</td>
+    </tr>
+  );
+}
+
+function FaqItem({ q, a }: { q: string; a: string }) {
+  return (
+    <div>
+      <dt className="text-sm font-semibold text-foreground">{q}</dt>
+      <dd className="mt-1 text-sm text-gray-500">{a}</dd>
     </div>
   );
 }
