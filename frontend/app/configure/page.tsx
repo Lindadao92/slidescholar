@@ -73,6 +73,7 @@ export default function ConfigurePage() {
   const [qaSlides, setQaSlides] = useState(true);
   const [citations, setCitations] = useState(false);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const raw = sessionStorage.getItem("parseResult");
@@ -94,8 +95,6 @@ export default function ConfigurePage() {
   const structureLabel = paper.structure ?? "IMRaD";
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? "http://localhost:8000";
-
-  const [submitting, setSubmitting] = useState(false);
 
   const handleGenerate = async () => {
     const config = {
