@@ -37,9 +37,9 @@ SLIDE_RANGES = {
     10: {"main": (7, 9),    "backup": (3, 4)},
     15: {"main": (10, 13),  "backup": (4, 6)},
     20: {"main": (14, 18),  "backup": (5, 7)},
-    30: {"main": (20, 25),  "backup": (6, 8)},
-    45: {"main": (28, 35),  "backup": (8, 10)},
-    60: {"main": (35, 45),  "backup": (10, 12)},
+    30: {"main": (18, 22),  "backup": (5, 7)},
+    45: {"main": (22, 25),  "backup": (6, 8)},
+    60: {"main": (25, 30),  "backup": (8, 10)},
 }
 
 
@@ -1195,7 +1195,7 @@ def plan_slides(
         )
 
     config = TALK_CONFIGS[talk_length]
-    client = anthropic.Anthropic(api_key=api_key, timeout=120.0, max_retries=1)
+    client = anthropic.Anthropic(api_key=api_key, timeout=300.0, max_retries=1)
     paper_summary = _build_paper_summary(paper)
 
     # --- Dynamic slide count ---
