@@ -253,6 +253,7 @@ def run():
 
     for paper in papers:
         log.info(f"Processing: {paper['title'][:70]}")
+        paper['title'] = paper['title'].replace('\xa0', ' ').encode('ascii', 'ignore').decode('ascii')
 
         try:
             pdf_resp = requests.get(paper["pdf_url"], timeout=30)
