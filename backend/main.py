@@ -207,7 +207,13 @@ async def parse_pdf_upload(file: UploadFile = File(...)):
         log.exception("Unexpected error parsing PDF")
         raise HTTPException(status_code=500, detail=f"Failed to parse PDF: {exc}")
 
-    _sessions[paper_id] = {"parsed": parsed, "session_dir": str(session_dir)}
+    _sessions[paper_id] = {
+        "parsed": parsed,
+        "session_dir": str(session_dir),
+        "uploaded_at": time.time(),
+        "source": "upload",
+        "filename": file.filename,
+    }
 
     # Build response
     return {
@@ -259,7 +265,13 @@ async def parse_arxiv(body: ArxivRequest):
         log.exception("Unexpected error parsing arXiv PDF")
         raise HTTPException(status_code=500, detail=f"Failed to parse PDF: {exc}")
 
-    _sessions[paper_id] = {"parsed": parsed, "session_dir": str(session_dir)}
+    _sessions[paper_id] = {
+        "parsed": parsed,
+        "session_dir": str(session_dir),
+        "uploaded_at": time.time(),
+        "source": "arxiv",
+        "arxiv_url": body.arxiv_url,
+    }
 
     return {
         "paper_id": paper_id,
@@ -319,18 +331,19 @@ def _run_generate_job(job_id: str, paper_id: str, talk_length: str,
 
         session.setdefault("files", {})[file_id] = output_path
 
-        _jobs[job_id] = {
+        _jobs[job_id].update({
             "status": "done",
+            "completed_at": time.time(),
             "result": {
                 "download_url": f"/api/download/{file_id}",
                 "slide_plan": plan,
             },
-        }
+        })
         log.info("Job %s: completed successfully", job_id[:8])
 
     except Exception as exc:
         log.exception("Job %s: failed", job_id[:8])
-        _jobs[job_id] = {"status": "error", "error": str(exc)}
+        _jobs[job_id].update({"status": "error", "completed_at": time.time(), "error": str(exc)})
 
 
 @app.post("/api/generate")
@@ -341,7 +354,13 @@ async def generate_slides(body: GenerateRequest):
         raise HTTPException(status_code=404, detail="Paper not found. Upload or parse a PDF first.")
 
     job_id = uuid.uuid4().hex
-    _jobs[job_id] = {"status": "pending"}
+    _jobs[job_id] = {
+        "status": "pending",
+        "paper_id": body.paper_id,
+        "talk_length": body.talk_length,
+        "created_at": time.time(),
+        "completed_at": None,
+    }
 
     thread = threading.Thread(
         target=_run_generate_job,
@@ -466,6 +485,71 @@ async def rebuild_presentation(request: Request):
             "Content-Disposition": 'attachment; filename="slidescholar_presentation.pptx"',
         },
     )
+
+
+# --- Admin ---
+
+ADMIN_KEY = os.getenv("ADMIN_KEY", "")
+
+
+def _fmt_time(ts: float | None) -> str:
+    if not ts:
+        return ""
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+@app.get("/api/admin/sessions")
+async def admin_sessions(key: str = ""):
+    """View all active sessions and jobs. Requires ADMIN_KEY query param."""
+    if not ADMIN_KEY or key != ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    sessions_out = []
+    for paper_id, session in _sessions.items():
+        parsed = session.get("parsed", {})
+        # Find jobs for this paper
+        paper_jobs = []
+        for job_id, job in _jobs.items():
+            if job.get("paper_id") == paper_id:
+                created = job.get("created_at")
+                completed = job.get("completed_at")
+                duration = (
+                    f"{completed - created:.1f}s"
+                    if created and completed
+                    else None
+                )
+                paper_jobs.append({
+                    "job_id": job_id[:12],
+                    "status": job.get("status"),
+                    "talk_length": job.get("talk_length"),
+                    "created_at": _fmt_time(created),
+                    "completed_at": _fmt_time(completed),
+                    "duration": duration,
+                    "error": job.get("error") if job.get("status") == "error" else None,
+                })
+
+        sessions_out.append({
+            "paper_id": paper_id[:12],
+            "title": parsed.get("title", "Unknown"),
+            "authors": parsed.get("authors", "Unknown"),
+            "num_pages": parsed.get("num_pages", 0),
+            "num_figures": parsed.get("num_figures", 0),
+            "source": session.get("source", "unknown"),
+            "filename": session.get("filename"),
+            "arxiv_url": session.get("arxiv_url"),
+            "uploaded_at": _fmt_time(session.get("uploaded_at")),
+            "jobs": paper_jobs,
+        })
+
+    return {
+        "total_sessions": len(_sessions),
+        "total_jobs": len(_jobs),
+        "jobs_done": sum(1 for j in _jobs.values() if j.get("status") == "done"),
+        "jobs_error": sum(1 for j in _jobs.values() if j.get("status") == "error"),
+        "jobs_running": sum(1 for j in _jobs.values() if j.get("status") in ("pending", "running")),
+        "sessions": sessions_out,
+    }
 
 
 if __name__ == "__main__":
