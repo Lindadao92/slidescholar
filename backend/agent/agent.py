@@ -218,7 +218,7 @@ Paper: {paper_url}
         msg["From"] = GMAIL_ADDRESS
         msg["To"] = to_email
         msg["Subject"] = subject
-        msg.attach(MIMEText(body, "plain"))
+        msg.attach(MIMEText(body, "plain", "utf-8"))
 
         attachment = MIMEApplication(pptx_bytes, Name=filename)
         attachment["Content-Disposition"] = f'attachment; filename="{filename}"'
