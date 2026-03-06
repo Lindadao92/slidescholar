@@ -316,7 +316,7 @@ export default function Home() {
 
           {/* Sub-CTA */}
           <p className="mt-4 text-center text-xs text-gray-400">
-            Free &middot; No signup &middot; 3 presentations per month
+            Free &middot; No signup required
           </p>
           <p className="mt-2 text-center">
             <a href="/example" className="text-xs font-medium text-accent hover:underline">
