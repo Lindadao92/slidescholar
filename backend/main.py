@@ -287,33 +287,28 @@ async def parse_arxiv(body: ArxivRequest):
 def _run_generate_job(job_id: str, paper_id: str, talk_length: str,
                       include_speaker_notes: bool, include_backup_slides: bool):
     """Background worker for slide generation."""
-    _jobs[job_id]["status"] = "running"
-    session = _sessions.get(paper_id)
-    if not session:
-        _jobs[job_id] = {"status": "error", "error": "Paper not found. Upload or parse a PDF first."}
-        return
-
-    parsed = session["parsed"]
-    session_dir = session["session_dir"]
-
     try:
+        _jobs[job_id]["status"] = "running"
+        log.info("Job %s: starting generation", job_id[:8])
+
+        session = _sessions.get(paper_id)
+        if not session:
+            _jobs[job_id] = {"status": "error", "error": "Paper not found. Upload or parse a PDF first."}
+            return
+
+        parsed = session["parsed"]
+        session_dir = session["session_dir"]
+
         plan = plan_slides(
             paper=parsed,
             talk_length=talk_length,
             include_speaker_notes=include_speaker_notes,
             include_backup_slides=include_backup_slides,
         )
-    except ValueError as exc:
-        _jobs[job_id] = {"status": "error", "error": str(exc)}
-        return
-    except RuntimeError as exc:
-        _jobs[job_id] = {"status": "error", "error": f"Slide planning failed: {exc}"}
-        return
 
-    file_id = uuid.uuid4().hex
-    output_path = os.path.join(session_dir, f"{file_id}.pptx")
+        file_id = uuid.uuid4().hex
+        output_path = os.path.join(session_dir, f"{file_id}.pptx")
 
-    try:
         if not plan.get("authors") or plan["authors"] == "Unknown":
             plan["authors"] = parsed.get("authors", "")
         build_presentation(
@@ -321,19 +316,21 @@ def _run_generate_job(job_id: str, paper_id: str, talk_length: str,
             figures=parsed.get("figures", []),
             output_path=output_path,
         )
+
+        session.setdefault("files", {})[file_id] = output_path
+
+        _jobs[job_id] = {
+            "status": "done",
+            "result": {
+                "download_url": f"/api/download/{file_id}",
+                "slide_plan": plan,
+            },
+        }
+        log.info("Job %s: completed successfully", job_id[:8])
+
     except Exception as exc:
-        _jobs[job_id] = {"status": "error", "error": f"Slide building failed: {exc}"}
-        return
-
-    session.setdefault("files", {})[file_id] = output_path
-
-    _jobs[job_id] = {
-        "status": "done",
-        "result": {
-            "download_url": f"/api/download/{file_id}",
-            "slide_plan": plan,
-        },
-    }
+        log.exception("Job %s: failed", job_id[:8])
+        _jobs[job_id] = {"status": "error", "error": str(exc)}
 
 
 @app.post("/api/generate")
