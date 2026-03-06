@@ -23,6 +23,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/agent/requirements.txt
 
+      - name: Restore sent papers cache
+        uses: actions/cache@v3
+        with:
+          path: backend/agent/sent_papers.json
+          key: sent-papers-cache
+
       - name: Run agent
         env:
           SLIDESCHOLAR_API_URL: ${{ secrets.SLIDESCHOLAR_API_URL }}
@@ -31,3 +37,9 @@ jobs:
           PAPERS_PER_RUN:       "5"
           TALK_LENGTH:          "conference"
         run: python backend/agent/agent.py
+
+      - name: Save sent papers cache
+        uses: actions/cache@v3
+        with:
+          path: backend/agent/sent_papers.json
+          key: sent-papers-cache
