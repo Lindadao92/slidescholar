@@ -200,7 +200,7 @@ def send_email(to_email: str, author_first_name: str, paper_title: str,
     """Send cold email with .pptx attached."""
     paper_title = clean_text(paper_title)
     author_first_name = clean_text(author_first_name)
-    subject = "I turned your paper into slides — free to use"
+    subject = "I turned your paper into slides - free to use"
     safe_title = re.sub(r'[^\w\s-]', '', paper_title[:50]).strip().replace(' ', '_')
     filename = f"SlideScholar_{safe_title}.pptx"
 
