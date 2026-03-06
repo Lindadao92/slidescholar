@@ -243,7 +243,7 @@ Paper: {paper_url}
         msg["To"] = to_email
         msg["Subject"] = subject
         body = clean_text(body)
-        log.info(f"DEBUG body repr first 60: {repr(body[:60])}")
+        log.info(f"DEBUG body repr full: {repr(body)}")
         msg.attach(MIMEText(body, "plain", "utf-8"))
 
         attachment = MIMEApplication(pptx_bytes, Name=filename)
@@ -252,7 +252,7 @@ Paper: {paper_url}
 
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-            server.sendmail(GMAIL_ADDRESS, to_email, msg.as_string())
+            server.send_message(msg)
 
         log.info(f"Email sent to {to_email}")
         return True
