@@ -51,11 +51,10 @@ export default function GeneratePage() {
     return () => timers.forEach(clearTimeout);
   }, []);
 
-  // API call with polling
+  // API call with polling via setInterval
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    cancelledRef.current = false;
 
     const paperRaw = sessionStorage.getItem("parseResult");
     if (!paperRaw || !configRaw) {
@@ -72,70 +71,67 @@ export default function GeneratePage() {
     }
 
     const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+    let jobId: string | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let timedOut = false;
+    const startTime = Date.now();
 
-    (async () => {
-      try {
-        // Step 1: Submit the job (fast — returns immediately)
-        const submitRes = await fetch(`${apiUrl}/api/generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            paper_id: paper.paper_id,
-            talk_length: config?.format,
-            include_speaker_notes: config?.speakerNotes,
-            include_backup_slides: config?.qaSlides,
-          }),
+    // Submit the job
+    fetch(`${apiUrl}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        paper_id: paper.paper_id,
+        talk_length: config?.format,
+        include_speaker_notes: config?.speakerNotes,
+        include_backup_slides: config?.qaSlides,
+      }),
+    })
+      .then((res) => {
+        if (!res.ok) return res.json().catch(() => null).then((body) => {
+          throw new Error(body?.detail || `Generation failed (${res.status})`);
         });
+        return res.json();
+      })
+      .then((data) => {
+        jobId = data.job_id;
+        if (!jobId) throw new Error("No job_id returned from server");
 
-        if (!submitRes.ok) {
-          const body = await submitRes.json().catch(() => null);
-          throw new Error(body?.detail || `Generation failed (${submitRes.status})`);
-        }
+        // Start polling with setInterval
+        pollTimer = setInterval(async () => {
+          try {
+            if (Date.now() - startTime > POLL_TIMEOUT_MS) {
+              timedOut = true;
+              if (pollTimer) clearInterval(pollTimer);
+              setError("Generation timed out. The paper may be too complex — please try again or use a shorter talk format.");
+              return;
+            }
 
-        const { job_id } = await submitRes.json();
-        if (!job_id) throw new Error("No job_id returned from server");
+            const pollRes = await fetch(`${apiUrl}/api/jobs/${jobId}`);
+            if (!pollRes.ok) return; // retry on next interval
 
-        // Step 2: Poll for completion
-        const startTime = Date.now();
+            const job = await pollRes.json();
 
-        while (!cancelledRef.current) {
-          if (Date.now() - startTime > POLL_TIMEOUT_MS) {
-            throw new Error("Generation timed out. The paper may be too complex — please try again or use a shorter talk format.");
+            if (job.status === "done") {
+              if (pollTimer) clearInterval(pollTimer);
+              sessionStorage.setItem("generateResult", JSON.stringify(job));
+              setCompletedStep(STEPS.length - 1);
+              setDone(true);
+            } else if (job.status === "error") {
+              if (pollTimer) clearInterval(pollTimer);
+              setError(job.detail || "Generation failed");
+            }
+          } catch {
+            // Network error on poll — retry on next interval
           }
-
-          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-
-          const pollRes = await fetch(`${apiUrl}/api/jobs/${job_id}`);
-          if (!pollRes.ok) {
-            throw new Error(`Polling failed (${pollRes.status})`);
-          }
-
-          const job = await pollRes.json();
-
-          if (job.status === "done") {
-            sessionStorage.setItem("generateResult", JSON.stringify(job));
-            setCompletedStep(STEPS.length - 1);
-            setDone(true);
-            return;
-          }
-
-          if (job.status === "error") {
-            throw new Error(job.detail || "Generation failed");
-          }
-
-          // still "pending" or "running" — keep polling
-        }
-      } catch (err: unknown) {
-        if (!cancelledRef.current) {
-          setError(
-            err instanceof Error ? err.message : "Something went wrong."
-          );
-        }
-      }
-    })();
+        }, POLL_INTERVAL_MS);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+      });
 
     return () => {
-      cancelledRef.current = true;
+      if (pollTimer) clearInterval(pollTimer);
     };
   }, [router, config, configRaw]);
 
