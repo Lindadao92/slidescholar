@@ -136,6 +136,48 @@ def extract_emails_from_pdf(pdf_bytes: bytes) -> list:
     return clean
 
 
+def extract_author_names_from_pdf(pdf_bytes: bytes) -> list:
+    """Extract author names from PDF metadata or first page text."""
+    # Try PDF metadata first
+    try:
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+            metadata = doc.metadata
+            if metadata and metadata.get("author"):
+                raw = metadata["author"]
+                # Split on common separators: comma, semicolon, "and"
+                names = re.split(r'[;,]|\band\b', raw)
+                names = [clean_text(n) for n in names if clean_text(n)]
+                if names:
+                    log.info(f"Author names from metadata: {names}")
+                    return names
+
+            # Fallback: look for author line on first page
+            # Typically right after the title, before abstract
+            text = doc[0].get_text()
+            lines = text.split('\n')
+            # Heuristic: author names are in the first ~15 lines, are short,
+            # contain mostly letters/spaces/commas, and don't look like titles or abstracts
+            for line in lines[1:15]:
+                line = line.strip()
+                # Skip empty, very long lines, lines that look like titles/abstracts
+                if not line or len(line) > 200:
+                    continue
+                if line.lower().startswith(('abstract', 'keywords', 'introduction')):
+                    break
+                # Author lines typically have commas or "and", and mostly letters
+                alpha_ratio = sum(1 for c in line if c.isalpha() or c in ' ,.-') / max(len(line), 1)
+                if alpha_ratio > 0.85 and (',' in line or ' and ' in line.lower()):
+                    names = re.split(r'[;,]|\band\b', line)
+                    names = [clean_text(n) for n in names if clean_text(n) and len(clean_text(n)) > 1]
+                    if 1 <= len(names) <= 20:
+                        log.info(f"Author names from text: {names}")
+                        return names
+    except Exception as e:
+        log.warning(f"Author name extraction failed: {e}")
+
+    return []
+
+
 def generate_slides(pdf_bytes: bytes, title: str):
     """Call SlideScholar API to parse PDF and generate .pptx."""
     try:
@@ -225,7 +267,7 @@ def send_email(to_email: str, author_first_name: str, paper_title: str,
 
 I came across your paper "{paper_title}" on arXiv and used SlideScholar to automatically generate a presentation deck from it.
 
-I've attached the .pptx — it's fully editable, so feel free to use or adapt it however you like.
+I've attached the .pptx - it's fully editable, so feel free to use or adapt it however you like.
 
 If you find it useful, you can generate slides from any paper at:
 https://slidescholar.vercel.app
@@ -275,6 +317,10 @@ def guess_first_name(email: str) -> str:
 
 def run():
     log.info("=== SlideScholar arXiv Agent starting ===")
+    if not os.path.exists(SENT_LOG_PATH):
+        with open(SENT_LOG_PATH, "w") as f:
+            json.dump([], f)
+        log.info(f"Created empty sent log at {SENT_LOG_PATH}")
     papers = fetch_arxiv_papers(PAPERS_PER_RUN)
     sent_ids = load_sent_ids()
     log.info(f"Loaded {len(sent_ids)} previously sent paper IDs")
@@ -313,7 +359,12 @@ def run():
             continue
 
         primary_email = emails[0]
-        first_name = guess_first_name(primary_email)
+        author_names = extract_author_names_from_pdf(pdf_bytes)
+        if author_names:
+            # Use the first author's first name
+            first_name = clean_text(author_names[0].split()[0])
+        else:
+            first_name = guess_first_name(primary_email)
 
         log.info(f"DEBUG title repr: {repr(paper['title'])}")
         log.info(f"DEBUG author repr: {repr(first_name)}")
