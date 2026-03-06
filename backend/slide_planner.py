@@ -14,7 +14,7 @@ load_dotenv()
 
 log = logging.getLogger("slidescholar")
 
-MODEL = "claude-sonnet-4-5-20250929"
+MODEL = "claude-sonnet-4-6"
 MAX_RETRIES = 2
 RETRY_DELAY = 2  # seconds
 
@@ -1192,7 +1192,7 @@ def plan_slides(
         )
 
     config = TALK_CONFIGS[talk_length]
-    client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
+    client = anthropic.Anthropic(api_key=api_key, timeout=120.0, max_retries=1)
     paper_summary = _build_paper_summary(paper)
 
     # --- Dynamic slide count ---

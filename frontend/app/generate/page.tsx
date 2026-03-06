@@ -5,15 +5,15 @@ import { useRouter } from "next/navigation";
 
 const STEPS = [
   { label: "Parsing paper structure", delayMs: 3_000 },
-  { label: "Extracting figures", delayMs: 10_000 },
-  { label: "Identifying key findings", delayMs: 25_000 },
-  { label: "Building slide narrative", delayMs: 50_000 },
-  { label: "Assembling presentation", delayMs: 75_000 },
-  { label: "Writing speaker notes", delayMs: 95_000 },
+  { label: "Extracting figures", delayMs: 15_000 },
+  { label: "Identifying key findings", delayMs: 45_000 },
+  { label: "Building slide narrative", delayMs: 90_000 },
+  { label: "Assembling presentation", delayMs: 150_000 },
+  { label: "Writing speaker notes", delayMs: 240_000 },
 ];
 
 const POLL_INTERVAL_MS = 3_000;
-const POLL_TIMEOUT_MS = 300_000;
+const POLL_TIMEOUT_MS = 600_000;
 
 const FORMAT_META: Record<string, { length: string; slides: string }> = {
   lightning: { length: "5-minute", slides: "5" },
