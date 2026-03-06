@@ -12,8 +12,8 @@ const STEPS = [
   { label: "Writing speaker notes", delayMs: 95_000 },
 ];
 
-const POLL_INTERVAL_MS = 3_000; // poll every 3 seconds
-const POLL_TIMEOUT_MS = 300_000; // give up after 5 minutes
+const POLL_INTERVAL_MS = 3_000;
+const POLL_TIMEOUT_MS = 300_000;
 
 const FORMAT_META: Record<string, { length: string; slides: string }> = {
   lightning: { length: "5-minute", slides: "5" },
@@ -26,8 +26,9 @@ export default function GeneratePage() {
   const [completedStep, setCompletedStep] = useState(-1);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
-  const startedRef = useRef(false);
-  const cancelledRef = useRef(false);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const submittedRef = useRef(false);
+  const startTimeRef = useRef(Date.now());
 
   const configRaw =
     typeof window !== "undefined"
@@ -51,10 +52,10 @@ export default function GeneratePage() {
     return () => timers.forEach(clearTimeout);
   }, []);
 
-  // API call with polling via setInterval
+  // Effect 1: Submit the job (runs once)
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
+    if (submittedRef.current) return;
+    submittedRef.current = true;
 
     const paperRaw = sessionStorage.getItem("parseResult");
     if (!paperRaw || !configRaw) {
@@ -71,12 +72,8 @@ export default function GeneratePage() {
     }
 
     const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    let jobId: string | null = null;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    let timedOut = false;
-    const startTime = Date.now();
+    startTimeRef.current = Date.now();
 
-    // Submit the job
     fetch(`${apiUrl}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -88,52 +85,62 @@ export default function GeneratePage() {
       }),
     })
       .then((res) => {
-        if (!res.ok) return res.json().catch(() => null).then((body) => {
-          throw new Error(body?.detail || `Generation failed (${res.status})`);
-        });
+        if (!res.ok)
+          return res
+            .json()
+            .catch(() => null)
+            .then((body) => {
+              throw new Error(body?.detail || `Generation failed (${res.status})`);
+            });
         return res.json();
       })
       .then((data) => {
-        jobId = data.job_id;
-        if (!jobId) throw new Error("No job_id returned from server");
-
-        // Start polling with setInterval
-        pollTimer = setInterval(async () => {
-          try {
-            if (Date.now() - startTime > POLL_TIMEOUT_MS) {
-              timedOut = true;
-              if (pollTimer) clearInterval(pollTimer);
-              setError("Generation timed out. The paper may be too complex — please try again or use a shorter talk format.");
-              return;
-            }
-
-            const pollRes = await fetch(`${apiUrl}/api/jobs/${jobId}`);
-            if (!pollRes.ok) return; // retry on next interval
-
-            const job = await pollRes.json();
-
-            if (job.status === "done") {
-              if (pollTimer) clearInterval(pollTimer);
-              sessionStorage.setItem("generateResult", JSON.stringify(job));
-              setCompletedStep(STEPS.length - 1);
-              setDone(true);
-            } else if (job.status === "error") {
-              if (pollTimer) clearInterval(pollTimer);
-              setError(job.detail || "Generation failed");
-            }
-          } catch {
-            // Network error on poll — retry on next interval
-          }
-        }, POLL_INTERVAL_MS);
+        if (!data.job_id) throw new Error("No job_id returned from server");
+        setJobId(data.job_id);
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "Something went wrong.");
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    return () => {
-      if (pollTimer) clearInterval(pollTimer);
-    };
-  }, [router, config, configRaw]);
+  // Effect 2: Poll for job completion (runs when jobId is set)
+  useEffect(() => {
+    if (!jobId || done || error) return;
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+    const timer = setInterval(async () => {
+      if (Date.now() - startTimeRef.current > POLL_TIMEOUT_MS) {
+        clearInterval(timer);
+        setError(
+          "Generation timed out. The paper may be too complex — please try again or use a shorter talk format."
+        );
+        return;
+      }
+
+      try {
+        const res = await fetch(`${apiUrl}/api/jobs/${jobId}`);
+        if (!res.ok) return;
+
+        const job = await res.json();
+
+        if (job.status === "done") {
+          clearInterval(timer);
+          sessionStorage.setItem("generateResult", JSON.stringify(job));
+          setCompletedStep(STEPS.length - 1);
+          setDone(true);
+        } else if (job.status === "error") {
+          clearInterval(timer);
+          setError(job.detail || "Generation failed");
+        }
+      } catch {
+        // Network error — retry on next interval
+      }
+    }, POLL_INTERVAL_MS);
+
+    return () => clearInterval(timer);
+  }, [jobId, done, error]);
 
   // Redirect after done animation settles
   useEffect(() => {
@@ -142,18 +149,15 @@ export default function GeneratePage() {
     return () => clearTimeout(t);
   }, [done, router]);
 
-  // Determine which step is "active" (first uncompleted)
   const activeStep = completedStep + 1;
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-4">
       <div className="w-full max-w-md">
-        {/* Logo */}
         <p className="mb-10 text-center text-lg font-bold tracking-tight">
           Slide<span className="text-accent">Scholar</span>
         </p>
 
-        {/* Steps */}
         <ol className="space-y-4">
           {STEPS.map((step, i) => {
             const isCompleted = i <= completedStep;
@@ -166,7 +170,6 @@ export default function GeneratePage() {
                   isCompleted || isActive ? "opacity-100" : "opacity-40"
                 }`}
               >
-                {/* Indicator */}
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center">
                   {isCompleted ? (
                     <svg
@@ -190,7 +193,6 @@ export default function GeneratePage() {
                   )}
                 </span>
 
-                {/* Label */}
                 <span
                   className={`text-sm ${
                     isCompleted
@@ -207,13 +209,11 @@ export default function GeneratePage() {
           })}
         </ol>
 
-        {/* Summary line */}
         <p className="mt-10 text-center text-sm text-gray-400">
           Creating your {meta.length} conference talk &middot; ~{meta.slides}{" "}
           slides
         </p>
 
-        {/* Pulse dots */}
         {!error && !done && (
           <div className="mt-4 flex items-center justify-center gap-1.5">
             <span
@@ -231,7 +231,6 @@ export default function GeneratePage() {
           </div>
         )}
 
-        {/* Error state */}
         {error && (
           <div className="mt-8 text-center">
             <p className="text-sm text-red-600">{error}</p>
@@ -239,8 +238,8 @@ export default function GeneratePage() {
               onClick={() => {
                 setError("");
                 setCompletedStep(-1);
-                startedRef.current = false;
-                // Trigger re-mount of the API effect
+                setJobId(null);
+                submittedRef.current = false;
                 router.replace("/generate");
               }}
               className="mt-4 rounded-lg bg-accent px-6 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
