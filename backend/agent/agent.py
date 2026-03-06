@@ -243,6 +243,7 @@ Paper: {paper_url}
         msg["To"] = to_email
         msg["Subject"] = subject
         body = clean_text(body)
+        log.info(f"DEBUG body repr first 60: {repr(body[:60])}")
         msg.attach(MIMEText(body, "plain", "utf-8"))
 
         attachment = MIMEApplication(pptx_bytes, Name=filename)
