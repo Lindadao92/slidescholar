@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 interface ParseResult {
+  paper_id?: string;
   title?: string;
   authors?: string | string[];
   num_pages?: number;
@@ -94,7 +95,9 @@ export default function ConfigurePage() {
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, "") ?? "http://localhost:8000";
 
-  const handleGenerate = () => {
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleGenerate = async () => {
     const config = {
       format,
       template,
@@ -102,9 +105,47 @@ export default function ConfigurePage() {
       qaSlides,
       citations,
     };
-
     sessionStorage.setItem("generateConfig", JSON.stringify(config));
-    router.push("/generate");
+
+    // Submit the job immediately
+    setSubmitting(true);
+    setError("");
+
+    try {
+      const res = await fetch(`${apiBase}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paper_id: paper.paper_id,
+          talk_length: format,
+          include_speaker_notes: speakerNotes,
+          include_backup_slides: qaSlides,
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail || `Generation failed (${res.status})`);
+      }
+
+      const data = await res.json();
+      if (!data.job_id) throw new Error("No job_id returned from server");
+
+      // Store active job for the banner to pick up
+      const activeJob = {
+        jobId: data.job_id,
+        startedAt: Date.now(),
+        format: TALK_FORMATS.find((f) => f.value === format)?.label ?? format,
+      };
+      sessionStorage.setItem("activeJob", JSON.stringify(activeJob));
+
+      // Navigate to the generate page for detailed progress
+      router.push("/generate");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -258,9 +299,20 @@ export default function ConfigurePage() {
         {/* Generate button */}
         <button
           onClick={handleGenerate}
-          className="mt-10 flex w-full items-center justify-center rounded-xl bg-accent py-4 text-base font-semibold text-white transition-opacity hover:opacity-90"
+          disabled={submitting}
+          className="mt-10 flex w-full items-center justify-center rounded-xl bg-accent py-4 text-base font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Generate My Slides &rarr;
+          {submitting ? (
+            <>
+              <svg className="mr-2 h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+              Starting...
+            </>
+          ) : (
+            "Generate My Slides \u2192"
+          )}
         </button>
       </main>
     </div>

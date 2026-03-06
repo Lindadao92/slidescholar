@@ -27,7 +27,6 @@ export default function GeneratePage() {
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
-  const submittedRef = useRef(false);
   const startTimeRef = useRef(Date.now());
 
   const configRaw =
@@ -52,59 +51,38 @@ export default function GeneratePage() {
     return () => timers.forEach(clearTimeout);
   }, []);
 
-  // Effect 1: Submit the job (runs once)
+  // Read job from sessionStorage (submitted by configure page)
   useEffect(() => {
-    if (submittedRef.current) return;
-    submittedRef.current = true;
-
-    const paperRaw = sessionStorage.getItem("parseResult");
-    if (!paperRaw || !configRaw) {
-      router.replace("/");
+    // Check if result already exists (came back to this page after completion)
+    const existingResult = sessionStorage.getItem("generateResult");
+    if (existingResult && !sessionStorage.getItem("activeJob")) {
+      setDone(true);
+      setCompletedStep(STEPS.length - 1);
       return;
     }
 
-    let paper: Record<string, unknown>;
+    const raw = sessionStorage.getItem("activeJob");
+    if (!raw) {
+      // No active job — go back to configure or home
+      const hasConfig = sessionStorage.getItem("generateConfig");
+      if (!hasConfig) {
+        router.replace("/");
+      } else {
+        router.replace("/configure");
+      }
+      return;
+    }
+
     try {
-      paper = JSON.parse(paperRaw);
+      const activeJob = JSON.parse(raw);
+      setJobId(activeJob.jobId);
+      startTimeRef.current = activeJob.startedAt;
     } catch {
       router.replace("/");
-      return;
     }
+  }, [router]);
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    startTimeRef.current = Date.now();
-
-    fetch(`${apiUrl}/api/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        paper_id: paper.paper_id,
-        talk_length: config?.format,
-        include_speaker_notes: config?.speakerNotes,
-        include_backup_slides: config?.qaSlides,
-      }),
-    })
-      .then((res) => {
-        if (!res.ok)
-          return res
-            .json()
-            .catch(() => null)
-            .then((body) => {
-              throw new Error(body?.detail || `Generation failed (${res.status})`);
-            });
-        return res.json();
-      })
-      .then((data) => {
-        if (!data.job_id) throw new Error("No job_id returned from server");
-        setJobId(data.job_id);
-      })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "Something went wrong.");
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Effect 2: Poll for job completion (runs when jobId is set)
+  // Poll for job completion
   useEffect(() => {
     if (!jobId || done || error) return;
 
@@ -116,6 +94,7 @@ export default function GeneratePage() {
         setError(
           "Generation timed out. The paper may be too complex — please try again or use a shorter talk format."
         );
+        sessionStorage.removeItem("activeJob");
         return;
       }
 
@@ -124,6 +103,7 @@ export default function GeneratePage() {
         if (res.status === 404) {
           clearInterval(timer);
           setError("Session expired (server restarted). Please go back and re-upload your paper.");
+          sessionStorage.removeItem("activeJob");
           return;
         }
         if (!res.ok) return;
@@ -133,11 +113,13 @@ export default function GeneratePage() {
         if (job.status === "done") {
           clearInterval(timer);
           sessionStorage.setItem("generateResult", JSON.stringify(job));
+          sessionStorage.removeItem("activeJob");
           setCompletedStep(STEPS.length - 1);
           setDone(true);
         } else if (job.status === "error") {
           clearInterval(timer);
           setError(job.detail || "Generation failed");
+          sessionStorage.removeItem("activeJob");
         }
       } catch {
         // Network error — retry on next interval
@@ -215,38 +197,42 @@ export default function GeneratePage() {
         </ol>
 
         <p className="mt-10 text-center text-sm text-gray-400">
-          Creating your {meta.length} conference talk &middot; ~{meta.slides}{" "}
-          slides
+          Creating your {meta.length} talk &middot; ~{meta.slides} slides
         </p>
 
         {!error && !done && (
-          <div className="mt-4 flex items-center justify-center gap-1.5">
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-accent/60 animate-pulse"
-              style={{ animationDelay: "0ms" }}
-            />
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-accent/60 animate-pulse"
-              style={{ animationDelay: "300ms" }}
-            />
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-accent/60 animate-pulse"
-              style={{ animationDelay: "600ms" }}
-            />
-          </div>
+          <>
+            <div className="mt-4 flex items-center justify-center gap-1.5">
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-accent/60 animate-pulse"
+                style={{ animationDelay: "0ms" }}
+              />
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-accent/60 animate-pulse"
+                style={{ animationDelay: "300ms" }}
+              />
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-accent/60 animate-pulse"
+                style={{ animationDelay: "600ms" }}
+              />
+            </div>
+            <p className="mt-6 text-center text-xs text-gray-300">
+              You can navigate away — we&apos;ll notify you when it&apos;s ready.
+            </p>
+            <button
+              onClick={() => router.push("/")}
+              className="mt-3 mx-auto block text-xs font-medium text-accent hover:underline"
+            >
+              Go back to home
+            </button>
+          </>
         )}
 
         {error && (
           <div className="mt-8 text-center">
             <p className="text-sm text-red-600">{error}</p>
             <button
-              onClick={() => {
-                setError("");
-                setCompletedStep(-1);
-                setJobId(null);
-                submittedRef.current = false;
-                router.replace("/generate");
-              }}
+              onClick={() => router.push("/configure")}
               className="mt-4 rounded-lg bg-accent px-6 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
             >
               Try Again
