@@ -12,7 +12,8 @@ const STEPS = [
   { label: "Writing speaker notes", delayMs: 95_000 },
 ];
 
-const GENERATE_TIMEOUT_MS = 180_000; // 3 minutes
+const POLL_INTERVAL_MS = 3_000; // poll every 3 seconds
+const POLL_TIMEOUT_MS = 300_000; // give up after 5 minutes
 
 const FORMAT_META: Record<string, { length: string; slides: string }> = {
   lightning: { length: "5-minute", slides: "5" },
@@ -26,6 +27,7 @@ export default function GeneratePage() {
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
   const startedRef = useRef(false);
+  const cancelledRef = useRef(false);
 
   const configRaw =
     typeof window !== "undefined"
@@ -49,10 +51,11 @@ export default function GeneratePage() {
     return () => timers.forEach(clearTimeout);
   }, []);
 
-  // API call
+  // API call with polling
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
+    cancelledRef.current = false;
 
     const paperRaw = sessionStorage.getItem("parseResult");
     if (!paperRaw || !configRaw) {
@@ -68,12 +71,12 @@ export default function GeneratePage() {
       return;
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
 
     (async () => {
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/generate`, {
+        // Step 1: Submit the job (fast — returns immediately)
+        const submitRes = await fetch(`${apiUrl}/api/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -82,32 +85,58 @@ export default function GeneratePage() {
             include_speaker_notes: config?.speakerNotes,
             include_backup_slides: config?.qaSlides,
           }),
-          signal: controller.signal,
         });
 
-        if (!res.ok) {
-          const body = await res.json().catch(() => null);
-          throw new Error(body?.detail || `Generation failed (${res.status})`);
+        if (!submitRes.ok) {
+          const body = await submitRes.json().catch(() => null);
+          throw new Error(body?.detail || `Generation failed (${submitRes.status})`);
         }
 
-        const data = await res.json();
-        sessionStorage.setItem("generateResult", JSON.stringify(data));
+        const { job_id } = await submitRes.json();
+        if (!job_id) throw new Error("No job_id returned from server");
 
-        // Complete all remaining steps visually then redirect
-        setCompletedStep(STEPS.length - 1);
-        setDone(true);
+        // Step 2: Poll for completion
+        const startTime = Date.now();
+
+        while (!cancelledRef.current) {
+          if (Date.now() - startTime > POLL_TIMEOUT_MS) {
+            throw new Error("Generation timed out. The paper may be too complex — please try again or use a shorter talk format.");
+          }
+
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+          const pollRes = await fetch(`${apiUrl}/api/jobs/${job_id}`);
+          if (!pollRes.ok) {
+            throw new Error(`Polling failed (${pollRes.status})`);
+          }
+
+          const job = await pollRes.json();
+
+          if (job.status === "done") {
+            sessionStorage.setItem("generateResult", JSON.stringify(job));
+            setCompletedStep(STEPS.length - 1);
+            setDone(true);
+            return;
+          }
+
+          if (job.status === "error") {
+            throw new Error(job.detail || "Generation failed");
+          }
+
+          // still "pending" or "running" — keep polling
+        }
       } catch (err: unknown) {
-        if (err instanceof DOMException && err.name === "AbortError") {
-          setError("Generation timed out. The paper may be too complex — please try again or use a shorter talk format.");
-        } else {
+        if (!cancelledRef.current) {
           setError(
             err instanceof Error ? err.message : "Something went wrong."
           );
         }
-      } finally {
-        clearTimeout(timeoutId);
       }
     })();
+
+    return () => {
+      cancelledRef.current = true;
+    };
   }, [router, config, configRaw]);
 
   // Redirect after done animation settles

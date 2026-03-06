@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -54,6 +55,10 @@ app.add_middleware(
 # --- In-memory session store ---
 # Maps paper_id -> {"parsed": dict, "session_dir": str}
 _sessions: dict[str, dict] = {}
+
+# --- Job store for async generation ---
+# Maps job_id -> {"status": "pending"|"running"|"done"|"error", "result": ..., "error": ...}
+_jobs: dict[str, dict] = {}
 
 
 # --- Request / response models ---
@@ -279,12 +284,14 @@ async def parse_arxiv(body: ArxivRequest):
     }
 
 
-@app.post("/api/generate")
-async def generate_slides(body: GenerateRequest):
-    """Generate a .pptx presentation from a previously parsed paper."""
-    session = _sessions.get(body.paper_id)
+def _run_generate_job(job_id: str, paper_id: str, talk_length: str,
+                      include_speaker_notes: bool, include_backup_slides: bool):
+    """Background worker for slide generation."""
+    _jobs[job_id]["status"] = "running"
+    session = _sessions.get(paper_id)
     if not session:
-        raise HTTPException(status_code=404, detail="Paper not found. Upload or parse a PDF first.")
+        _jobs[job_id] = {"status": "error", "error": "Paper not found. Upload or parse a PDF first."}
+        return
 
     parsed = session["parsed"]
     session_dir = session["session_dir"]
@@ -292,21 +299,21 @@ async def generate_slides(body: GenerateRequest):
     try:
         plan = plan_slides(
             paper=parsed,
-            talk_length=body.talk_length,
-            include_speaker_notes=body.include_speaker_notes,
-            include_backup_slides=body.include_backup_slides,
+            talk_length=talk_length,
+            include_speaker_notes=include_speaker_notes,
+            include_backup_slides=include_backup_slides,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        _jobs[job_id] = {"status": "error", "error": str(exc)}
+        return
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=f"Slide planning failed: {exc}")
+        _jobs[job_id] = {"status": "error", "error": f"Slide planning failed: {exc}"}
+        return
 
-    # Build the .pptx
     file_id = uuid.uuid4().hex
     output_path = os.path.join(session_dir, f"{file_id}.pptx")
 
     try:
-        # Use Claude's extracted authors if available, fall back to parser's
         if not plan.get("authors") or plan["authors"] == "Unknown":
             plan["authors"] = parsed.get("authors", "")
         build_presentation(
@@ -315,15 +322,54 @@ async def generate_slides(body: GenerateRequest):
             output_path=output_path,
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Slide building failed: {exc}")
+        _jobs[job_id] = {"status": "error", "error": f"Slide building failed: {exc}"}
+        return
 
-    # Store the file_id -> path mapping in the session
     session.setdefault("files", {})[file_id] = output_path
 
-    return {
-        "download_url": f"/api/download/{file_id}",
-        "slide_plan": plan,
+    _jobs[job_id] = {
+        "status": "done",
+        "result": {
+            "download_url": f"/api/download/{file_id}",
+            "slide_plan": plan,
+        },
     }
+
+
+@app.post("/api/generate")
+async def generate_slides(body: GenerateRequest):
+    """Start slide generation as a background job. Returns a job_id to poll."""
+    session = _sessions.get(body.paper_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Paper not found. Upload or parse a PDF first.")
+
+    job_id = uuid.uuid4().hex
+    _jobs[job_id] = {"status": "pending"}
+
+    thread = threading.Thread(
+        target=_run_generate_job,
+        args=(job_id, body.paper_id, body.talk_length,
+              body.include_speaker_notes, body.include_backup_slides),
+        daemon=True,
+    )
+    thread.start()
+
+    return {"job_id": job_id}
+
+
+@app.get("/api/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    """Poll for job completion."""
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job["status"] == "done":
+        return {"status": "done", **job["result"]}
+    elif job["status"] == "error":
+        return {"status": "error", "detail": job.get("error", "Unknown error")}
+    else:
+        return {"status": job["status"]}
 
 
 @app.get("/api/figures/{paper_id}/{filename}")
