@@ -15,6 +15,7 @@ load_dotenv()
 log = logging.getLogger("slidescholar")
 
 MODEL = "claude-sonnet-4-6"
+MODEL_FAST = "claude-haiku-4-5-20251001"
 MAX_RETRIES = 2
 RETRY_DELAY = 2  # seconds
 
@@ -1088,15 +1089,17 @@ def _validate_layout_variety(slides: list[dict]) -> None:
 
 
 def _call_claude(
-    client: anthropic.Anthropic, system: str, user: str, max_tokens: int = 4096
+    client: anthropic.Anthropic, system: str, user: str, max_tokens: int = 4096,
+    model: str | None = None,
 ) -> dict | list:
     """Call Claude with retry logic and return parsed JSON."""
     last_error = None
+    use_model = model or MODEL
 
     for attempt in range(MAX_RETRIES + 1):
         try:
             response = client.messages.create(
-                model=MODEL,
+                model=use_model,
                 max_tokens=max_tokens,
                 system=system,
                 messages=[{"role": "user", "content": user}],
@@ -1282,7 +1285,10 @@ def plan_slides(
 
     plan_user = f"Here is the paper:\n\n{paper_summary}"
 
+    log.info("Starting Claude API call 1/3: slide plan (%s, %d tokens)", MODEL, plan_tokens)
+    t0 = time.time()
     plan_data = _call_claude(client, plan_system, plan_user, max_tokens=plan_tokens)
+    log.info("Slide plan call completed in %.1fs", time.time() - t0)
 
     # Normalize: extract slides list
     if isinstance(plan_data, list):
@@ -1294,8 +1300,10 @@ def plan_slides(
     if isinstance(slides, dict):
         slides = [slides]
 
-    # --- CALLS 2 & 3: Speaker notes + Backup slides (parallel) ---
+    # --- CALLS 2 & 3: Speaker notes + Backup slides (parallel, fast model) ---
     # Both depend on the plan but are independent of each other.
+    log.info("Starting parallel API calls (notes + backup) using %s", MODEL_FAST)
+    t1 = time.time()
     notes_future: Future | None = None
     backup_future: Future | None = None
 
@@ -1326,7 +1334,8 @@ def plan_slides(
                 f"ONLY reference figures/tables/equations that are marked as present."
             )
             notes_future = executor.submit(
-                _call_claude, client, SYSTEM_PROMPT_NOTES, notes_user
+                _call_claude, client, SYSTEM_PROMPT_NOTES, notes_user,
+                4096, MODEL_FAST,
             )
 
         # Submit backup slides call
@@ -1346,10 +1355,12 @@ def plan_slides(
                 f"plus limitations and reproducibility."
             )
             backup_future = executor.submit(
-                _call_claude, client, backup_system, backup_user, 3072
+                _call_claude, client, backup_system, backup_user, 3072,
+                MODEL_FAST,
             )
 
     # Collect speaker notes result
+    log.info("Parallel calls completed in %.1fs", time.time() - t1)
     if notes_future is not None:
         notes_data = notes_future.result()
 
