@@ -407,35 +407,6 @@ export default function Home() {
       </section>
 
       {/* ================================================================ */}
-      {/*  FAQ                                                             */}
-      {/* ================================================================ */}
-      <section className="border-t border-gray-100 bg-gray-50/60 px-4 py-16">
-        <div className="mx-auto max-w-2xl">
-          <h2 className="text-center text-sm font-semibold uppercase tracking-wide text-gray-400">
-            FAQ
-          </h2>
-          <dl className="mt-8 space-y-6">
-            <FaqItem
-              q="Is my paper safe?"
-              a="Yes. Files are deleted after 24 hours and are never used for training."
-            />
-            <FaqItem
-              q="Can I edit slides before downloading?"
-              a="Yes. Full inline editing — titles, bullets, tables, annotations, speaker notes — all editable in the browser before you download."
-            />
-            <FaqItem
-              q="What format do I get?"
-              a=".pptx — works in PowerPoint, Google Slides, and Keynote."
-            />
-            <FaqItem
-              q="Is it free?"
-              a="3 free presentations per month, no signup required."
-            />
-          </dl>
-        </div>
-      </section>
-
-      {/* ================================================================ */}
       {/*  FOOTER                                                          */}
       {/* ================================================================ */}
       <footer className="border-t border-gray-100 px-4 py-8 text-center text-xs text-gray-400">
@@ -519,11 +490,3 @@ function CompareRow({
   );
 }
 
-function FaqItem({ q, a }: { q: string; a: string }) {
-  return (
-    <div>
-      <dt className="text-sm font-semibold text-foreground">{q}</dt>
-      <dd className="mt-1 text-sm text-gray-500">{a}</dd>
-    </div>
-  );
-}
