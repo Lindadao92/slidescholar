@@ -69,10 +69,28 @@ export default function Home() {
     setError("");
   };
 
+  const isValidArxivUrl = (url: string): boolean => {
+    return /arxiv\.org\/(?:abs|pdf)\/\d+\.\d+/i.test(url.trim());
+  };
+
   const handleSubmit = async () => {
     if (!hasInput) return;
+
+    if (!file && !isValidArxivUrl(arxivUrl)) {
+      setError("Please enter a valid arXiv URL (e.g. https://arxiv.org/abs/2301.00001)");
+      return;
+    }
+
     setLoading(true);
     setError("");
+
+    // Clear stale session data before new upload
+    sessionStorage.removeItem("parseResult");
+    sessionStorage.removeItem("generateConfig");
+    sessionStorage.removeItem("generateResult");
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120_000); // 2 min timeout
 
     try {
       let res: Response;
@@ -83,12 +101,14 @@ export default function Home() {
         res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/parse`, {
           method: "POST",
           body: formData,
+          signal: controller.signal,
         });
       } else {
         res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/parse-arxiv`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ arxiv_url: arxivUrl.trim() }),
+          signal: controller.signal,
         });
       }
 
@@ -101,8 +121,13 @@ export default function Home() {
       sessionStorage.setItem("parseResult", JSON.stringify(data));
       router.push("/configure");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setError("Request timed out. The paper may be too large — please try a smaller file.");
+      } else {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+      }
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };

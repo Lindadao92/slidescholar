@@ -196,6 +196,10 @@ async def parse_pdf_upload(file: UploadFile = File(...)):
     except (FileNotFoundError, ValueError) as exc:
         shutil.rmtree(session_dir, ignore_errors=True)
         raise HTTPException(status_code=422, detail=f"Failed to parse PDF: {exc}")
+    except Exception as exc:
+        shutil.rmtree(session_dir, ignore_errors=True)
+        log.exception("Unexpected error parsing PDF")
+        raise HTTPException(status_code=500, detail=f"Failed to parse PDF: {exc}")
 
     _sessions[paper_id] = {"parsed": parsed, "session_dir": str(session_dir)}
 
@@ -244,6 +248,10 @@ async def parse_arxiv(body: ArxivRequest):
     except (FileNotFoundError, ValueError) as exc:
         shutil.rmtree(session_dir, ignore_errors=True)
         raise HTTPException(status_code=422, detail=f"Failed to parse PDF: {exc}")
+    except Exception as exc:
+        shutil.rmtree(session_dir, ignore_errors=True)
+        log.exception("Unexpected error parsing arXiv PDF")
+        raise HTTPException(status_code=500, detail=f"Failed to parse PDF: {exc}")
 
     _sessions[paper_id] = {"parsed": parsed, "session_dir": str(session_dir)}
 
@@ -323,6 +331,9 @@ async def get_figure(paper_id: str, filename: str):
     session = _sessions.get(paper_id)
     if not session:
         raise HTTPException(status_code=404, detail="Paper not found")
+
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
     file_path = Path(session["session_dir"]) / "figures" / filename
     if not file_path.is_file():

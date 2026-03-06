@@ -1191,7 +1191,7 @@ def plan_slides(
         )
 
     config = TALK_CONFIGS[talk_length]
-    client = anthropic.Anthropic(api_key=api_key, timeout=600.0)
+    client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
     paper_summary = _build_paper_summary(paper)
 
     # --- Dynamic slide count ---

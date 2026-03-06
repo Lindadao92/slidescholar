@@ -481,6 +481,7 @@ export default function PreviewPage() {
   const [selected, setSelected] = useState(0);
   const [hasEdits, setHasEdits] = useState(false);
   const [isRebuilding, setIsRebuilding] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
   const [draftNotes, setDraftNotes] = useState("");
   const mainCountRef = useRef(0);
 
@@ -592,29 +593,45 @@ export default function PreviewPage() {
 
   /* ---- Download (original file if no edits, or rebuild) ---- */
   const handleDownload = useCallback(async () => {
+    setDownloadError("");
+
     if (!hasEdits && downloadUrl) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60_000);
       try {
-        const res = await fetch(resolveUrl(downloadUrl));
+        const res = await fetch(resolveUrl(downloadUrl), { signal: controller.signal });
+        if (!res.ok) throw new Error(`Download failed (${res.status})`);
         const blob = await res.blob();
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         a.download = "slidescholar_presentation.pptx";
         a.click();
         URL.revokeObjectURL(a.href);
-      } catch { alert("Download failed. Please try again."); }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          setDownloadError("Download timed out. Please try again.");
+        } else {
+          setDownloadError("Download failed. Please try again.");
+        }
+      } finally {
+        clearTimeout(timeoutId);
+      }
       return;
     }
 
     if (!slidePlan || !paperId) {
-      alert("Session expired. Please go back and regenerate.");
+      setDownloadError("Session expired. Please go back and regenerate.");
       return;
     }
     setIsRebuilding(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120_000);
     try {
       const res = await fetch(`${API_BASE}/api/rebuild`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ slide_plan: slidePlan, paper_id: paperId }),
+        signal: controller.signal,
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Rebuild failed" }));
@@ -627,8 +644,13 @@ export default function PreviewPage() {
       a.click();
       URL.revokeObjectURL(a.href);
     } catch (err) {
-      alert(`Download failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setDownloadError("Rebuild timed out. Please try again.");
+      } else {
+        setDownloadError(`Download failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      }
     } finally {
+      clearTimeout(timeoutId);
       setIsRebuilding(false);
     }
   }, [hasEdits, downloadUrl, slidePlan, paperId]);
@@ -697,6 +719,14 @@ export default function PreviewPage() {
           {isRebuilding ? "Building..." : "\u2193 Download .pptx"}
         </button>
       </nav>
+
+      {/* Download error banner */}
+      {downloadError && (
+        <div className="flex items-center justify-between bg-red-50 px-4 py-2 text-sm text-red-700">
+          <span>{downloadError}</span>
+          <button onClick={() => setDownloadError("")} className="ml-4 font-medium hover:text-red-900">&times;</button>
+        </div>
+      )}
 
       {/* ---- 3-panel body ---- */}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">

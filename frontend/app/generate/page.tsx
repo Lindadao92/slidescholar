@@ -4,13 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const STEPS = [
-  { label: "Parsing paper structure", delayMs: 2_000 },
-  { label: "Extracting figures", delayMs: 5_000 },
-  { label: "Identifying key findings", delayMs: 10_000 },
-  { label: "Building slide narrative", delayMs: 18_000 },
-  { label: "Assembling presentation", delayMs: 28_000 },
-  { label: "Writing speaker notes", delayMs: 40_000 },
+  { label: "Parsing paper structure", delayMs: 3_000 },
+  { label: "Extracting figures", delayMs: 10_000 },
+  { label: "Identifying key findings", delayMs: 25_000 },
+  { label: "Building slide narrative", delayMs: 50_000 },
+  { label: "Assembling presentation", delayMs: 75_000 },
+  { label: "Writing speaker notes", delayMs: 95_000 },
 ];
+
+const GENERATE_TIMEOUT_MS = 180_000; // 3 minutes
 
 const FORMAT_META: Record<string, { length: string; slides: string }> = {
   lightning: { length: "5-minute", slides: "5" },
@@ -29,8 +31,14 @@ export default function GeneratePage() {
     typeof window !== "undefined"
       ? sessionStorage.getItem("generateConfig")
       : null;
-  const config = configRaw ? JSON.parse(configRaw) : null;
-  const meta = FORMAT_META[config?.format] ?? FORMAT_META.conference;
+
+  let config: Record<string, unknown> | null = null;
+  try {
+    config = configRaw ? JSON.parse(configRaw) : null;
+  } catch {
+    config = null;
+  }
+  const meta = FORMAT_META[config?.format as string] ?? FORMAT_META.conference;
 
   // Simulated step progression
   useEffect(() => {
@@ -52,7 +60,16 @@ export default function GeneratePage() {
       return;
     }
 
-    const paper = JSON.parse(paperRaw);
+    let paper: Record<string, unknown>;
+    try {
+      paper = JSON.parse(paperRaw);
+    } catch {
+      router.replace("/");
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
 
     (async () => {
       try {
@@ -61,10 +78,11 @@ export default function GeneratePage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             paper_id: paper.paper_id,
-            talk_length: config.format,
-            include_speaker_notes: config.speakerNotes,
-            include_backup_slides: config.qaSlides,
+            talk_length: config?.format,
+            include_speaker_notes: config?.speakerNotes,
+            include_backup_slides: config?.qaSlides,
           }),
+          signal: controller.signal,
         });
 
         if (!res.ok) {
@@ -79,9 +97,15 @@ export default function GeneratePage() {
         setCompletedStep(STEPS.length - 1);
         setDone(true);
       } catch (err: unknown) {
-        setError(
-          err instanceof Error ? err.message : "Something went wrong."
-        );
+        if (err instanceof DOMException && err.name === "AbortError") {
+          setError("Generation timed out. The paper may be too complex — please try again or use a shorter talk format.");
+        } else {
+          setError(
+            err instanceof Error ? err.message : "Something went wrong."
+          );
+        }
+      } finally {
+        clearTimeout(timeoutId);
       }
     })();
   }, [router, config, configRaw]);
