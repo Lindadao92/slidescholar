@@ -20,6 +20,7 @@ out/
 
 # Allow example assets in frontend public
 !frontend/public/sample-paper.pdf
+!frontend/public/sample-presentation.pdf
 !frontend/public/sample-presentation.pptx
 
 # OS
