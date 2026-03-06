@@ -194,57 +194,9 @@ export default function Home() {
       </section>
 
       {/* ================================================================ */}
-      {/*  FEATURES                                                        */}
+      {/*  UPLOAD BOX                                                      */}
       {/* ================================================================ */}
-      <section className="border-t border-gray-100 bg-gray-50/60 px-4 py-16">
-        <div className="mx-auto max-w-4xl">
-          <h2 className="text-center text-sm font-semibold uppercase tracking-wide text-gray-400">
-            What you get
-          </h2>
-          <div className="mt-8 grid gap-6 sm:grid-cols-2">
-            <FeatureCard
-              title="Assertion-Evidence Titles"
-              desc="Every slide makes a claim, not a topic label. The format top researchers use."
-            />
-            <FeatureCard
-              title="Your Figures, Properly Placed"
-              desc="Extracted from your PDF with correct aspect ratios and captions."
-            />
-            <FeatureCard
-              title="Editable Tables"
-              desc="Paper tables become clean PowerPoint tables with key results bolded."
-            />
-            <FeatureCard
-              title="Speaker Notes with Timing"
-              desc="Conversational notes with [pause] markers and per-slide time budgets."
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* ================================================================ */}
-      {/*  HOW IT WORKS                                                    */}
-      {/* ================================================================ */}
-      <section className="px-4 py-16">
-        <div className="mx-auto max-w-3xl">
-          <h2 className="text-center text-sm font-semibold uppercase tracking-wide text-gray-400">
-            How it works
-          </h2>
-          <div className="mt-8 grid gap-8 sm:grid-cols-3">
-            <Step number="1" title="Upload your paper" desc="PDF or arXiv URL" />
-            <Step number="2" title="Pick your talk format" desc="5 / 15 / 45 minutes" />
-            <Step number="3" title="Edit inline & download" desc="Tweak any slide, then export .pptx" />
-          </div>
-          <p className="mt-6 text-center text-sm font-medium text-accent">
-            Total time: under 2 minutes
-          </p>
-        </div>
-      </section>
-
-      {/* ================================================================ */}
-      {/*  UPLOAD BOX (existing functionality, unchanged)                  */}
-      {/* ================================================================ */}
-      <section className="border-t border-gray-100 bg-gray-50/60 px-4 py-16">
+      <section id="upload" className="border-t border-gray-100 bg-gray-50/60 px-4 py-16">
         <div className="mx-auto max-w-xl">
           <h2 className="mb-8 text-center text-2xl font-bold tracking-tight sm:text-3xl">
             Try it now
@@ -367,9 +319,57 @@ export default function Home() {
             Free &middot; No signup &middot; 3 presentations per month
           </p>
           <p className="mt-2 text-center">
-            <a href="#" className="text-xs font-medium text-accent hover:underline">
+            <a href="/example" className="text-xs font-medium text-accent hover:underline">
               See example output &rarr;
             </a>
+          </p>
+        </div>
+      </section>
+
+      {/* ================================================================ */}
+      {/*  FEATURES                                                        */}
+      {/* ================================================================ */}
+      <section className="px-4 py-16">
+        <div className="mx-auto max-w-4xl">
+          <h2 className="text-center text-sm font-semibold uppercase tracking-wide text-gray-400">
+            What you get
+          </h2>
+          <div className="mt-8 grid gap-6 sm:grid-cols-2">
+            <FeatureCard
+              title="Assertion-Evidence Titles"
+              desc="Every slide makes a claim, not a topic label. The format top researchers use."
+            />
+            <FeatureCard
+              title="Your Figures, Properly Placed"
+              desc="Extracted from your PDF with correct aspect ratios and captions."
+            />
+            <FeatureCard
+              title="Editable Tables"
+              desc="Paper tables become clean PowerPoint tables with key results bolded."
+            />
+            <FeatureCard
+              title="Speaker Notes with Timing"
+              desc="Conversational notes with [pause] markers and per-slide time budgets."
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ================================================================ */}
+      {/*  HOW IT WORKS                                                    */}
+      {/* ================================================================ */}
+      <section className="border-t border-gray-100 bg-gray-50/60 px-4 py-16">
+        <div className="mx-auto max-w-3xl">
+          <h2 className="text-center text-sm font-semibold uppercase tracking-wide text-gray-400">
+            How it works
+          </h2>
+          <div className="mt-8 grid gap-8 sm:grid-cols-3">
+            <Step number="1" title="Upload your paper" desc="PDF or arXiv URL" />
+            <Step number="2" title="Pick your talk format" desc="5 / 15 / 45 minutes" />
+            <Step number="3" title="Edit inline & download" desc="Tweak any slide, then export .pptx" />
+          </div>
+          <p className="mt-6 text-center text-sm font-medium text-accent">
+            Total time: under 2 minutes
           </p>
         </div>
       </section>
@@ -489,4 +489,3 @@ function CompareRow({
     </tr>
   );
 }
-
