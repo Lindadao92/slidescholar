@@ -779,6 +779,21 @@ Keep table rows concise. Keep annotations SHORT (5-10 words).
 The visual_checklist forces you to account for every figure and table. \
 If visual_ratio is below 50%, go back and add more visual evidence.
 
+### Rule 32a: Figure-slide RELEVANCE is mandatory (NON-NEGOTIABLE)
+Every figure_reference MUST be semantically related to the slide's content:
+- A slide about "Method X outperforms baselines" → use a results/comparison figure
+- A slide about "Architecture overview" → use the architecture diagram figure
+- A slide about "Training procedure" → use a training curve or pipeline figure
+- NEVER place a random or unrelated figure just to have a visual
+
+Before assigning a figure, CHECK its caption from the AVAILABLE FIGURES list. \
+The caption tells you what the figure shows. Only assign it to a slide \
+whose title/content matches what the figure depicts.
+
+If no available figure is relevant to a slide's topic, use a different \
+layout (hero_table, key_number, equation, or bullets) instead of forcing \
+an unrelated figure.
+
 ### Rule 32: ABSOLUTE REQUIREMENT — zero missing experiments (NON-NEGOTIABLE)
 After generating your slide plan, perform this self-check:
 
@@ -990,7 +1005,7 @@ def _build_paper_summary(paper: dict) -> str:
             fig_num = fig.get("figure_number") or fig.get("figure_label") or (i + 1)
             parts.append(
                 f"  - Figure {fig_num} (page {page}): {caption}\n"
-                f"    → USE for any slide about the topic this figure illustrates"
+                f"    → ONLY use on slides whose content matches this caption"
             )
 
     summary = "\n".join(parts)
