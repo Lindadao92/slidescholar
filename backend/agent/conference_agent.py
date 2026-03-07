@@ -34,12 +34,19 @@ SENT_LOG_PATH      = os.getenv("SENT_LOG_PATH", os.path.join(os.path.dirname(__f
 logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-# ── arXiv categories to monitor ──────────────────────────────────────────────
-ARXIV_FEEDS = [
-    "https://rss.arxiv.org/rss/cs.AI",
-    "https://rss.arxiv.org/rss/cs.LG",
-    "https://rss.arxiv.org/rss/q-bio",
-    "https://rss.arxiv.org/rss/physics.med-ph",
+# ── Conferences to monitor ───────────────────────────────────────────────────
+CONFERENCES = [
+    ("ICLR 2025",    'co:"accepted at ICLR 2025"'),
+    ("ICLR 2026",    'co:"accepted at ICLR 2026"'),
+    ("ICLR 2026",    'co:"accepted to ICLR 2026"'),
+    ("ICML 2026",    'co:"accepted at ICML 2026"'),
+    ("ICML 2026",    'co:"accepted to ICML 2026"'),
+    ("NeurIPS 2026", 'co:"accepted at NeurIPS 2026"'),
+    ("NeurIPS 2026", 'co:"accepted to NeurIPS 2026"'),
+    ("CVPR 2026",    'co:"accepted at CVPR 2026"'),
+    ("CVPR 2026",    'co:"accepted to CVPR 2026"'),
+    ("ACL 2026",     'co:"accepted at ACL 2026"'),
+    ("EMNLP 2026",   'co:"accepted at EMNLP 2026"'),
 ]
 
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
@@ -79,15 +86,21 @@ def parse_arxiv_id(raw_id: str) -> str:
 
 
 def fetch_conference_papers(max_papers: int) -> list:
-    """Fetch recent papers from arXiv RSS feeds."""
+    """Fetch accepted conference papers from arXiv API by searching comments."""
     papers = []
     seen_ids = set()
 
-    for feed_url in ARXIV_FEEDS:
+    for conf_name, query in CONFERENCES:
         if len(papers) >= max_papers:
             break
         try:
-            feed = feedparser.parse(feed_url)
+            api_url = (
+                f"http://export.arxiv.org/api/query?search_query={query}"
+                f"&sortBy=submittedDate&sortOrder=descending&max_results=10"
+            )
+            resp = requests.get(api_url, timeout=30)
+            resp.raise_for_status()
+            feed = feedparser.parse(resp.text)
             for entry in feed.entries:
                 if len(papers) >= max_papers:
                     break
@@ -101,11 +114,14 @@ def fetch_conference_papers(max_papers: int) -> list:
                     "title":   entry.get("title", "").replace("\n", " ").strip(),
                     "pdf_url": f"https://arxiv.org/pdf/{arxiv_id}",
                     "abs_url": f"https://arxiv.org/abs/{arxiv_id}",
+                    "conference": conf_name,
                 })
+            log.info(f"Fetched {len(feed.entries)} results for {conf_name}")
         except Exception as e:
-            log.warning(f"Failed to fetch {feed_url}: {e}")
+            log.warning(f"Failed to fetch {conf_name}: {e}")
+        time.sleep(3)  # be polite to arXiv API
 
-    log.info(f"Fetched {len(papers)} papers from arXiv")
+    log.info(f"Fetched {len(papers)} conference papers total")
     return papers
 
 
