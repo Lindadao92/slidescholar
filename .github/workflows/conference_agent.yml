@@ -1,0 +1,47 @@
+name: SlideScholar Conference Agent
+
+on:
+  schedule:
+    # Runs every day at 10:00 AM UTC
+    - cron: "0 10 * * *"
+  workflow_dispatch:  # allows manual trigger from GitHub UI
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r backend/agent/requirements.txt
+
+      - name: Restore sent papers cache
+        uses: actions/cache@v3
+        with:
+          path: backend/agent/sent_conference_papers.json
+          key: sent-conference-papers-${{ github.run_id }}
+          restore-keys: sent-conference-papers-
+
+      - name: Run agent
+        env:
+          SLIDESCHOLAR_API_URL: ${{ secrets.SLIDESCHOLAR_API_URL }}
+          GMAIL_ADDRESS:        ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD:   ${{ secrets.GMAIL_APP_PASSWORD }}
+          PAPERS_PER_RUN:       "5"
+          TALK_LENGTH:          "conference"
+          SENT_LOG_PATH:        "backend/agent/sent_conference_papers.json"
+        run: python backend/agent/conference_agent.py
+
+      - name: Save sent papers cache
+        uses: actions/cache@v3
+        with:
+          path: backend/agent/sent_conference_papers.json
+          key: sent-conference-papers-${{ github.run_id }}
