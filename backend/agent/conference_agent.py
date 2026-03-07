@@ -78,7 +78,7 @@ def parse_arxiv_id(raw_id: str) -> str:
     return arxiv_id
 
 
-def fetch_arxiv_papers(max_papers: int) -> list:
+def fetch_conference_papers(max_papers: int) -> list:
     """Fetch recent papers from arXiv RSS feeds."""
     papers = []
     seen_ids = set()
@@ -311,12 +311,12 @@ def guess_first_name(email: str) -> str:
 
 
 def run():
-    log.info("=== SlideScholar arXiv Agent starting ===")
+    log.info("=== SlideScholar Conference Agent starting ===")
     if not os.path.exists(SENT_LOG_PATH):
         with open(SENT_LOG_PATH, "w") as f:
             json.dump([], f)
         log.info(f"Created empty sent log at {SENT_LOG_PATH}")
-    papers = fetch_arxiv_papers(PAPERS_PER_RUN)
+    papers = fetch_conference_papers(PAPERS_PER_RUN)
     sent_ids = load_sent_ids()
     log.info(f"Loaded {len(sent_ids)} previously sent paper IDs")
 
