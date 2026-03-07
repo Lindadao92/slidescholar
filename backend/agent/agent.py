@@ -24,8 +24,8 @@ import fitz  # PyMuPDF
 
 # ── Config from environment variables ────────────────────────────────────────
 SLIDESCHOLAR_API   = os.environ["SLIDESCHOLAR_API_URL"]
-GMAIL_ADDRESS      = os.environ["GMAIL_ADDRESS"]
-GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
+GMAIL_ADDRESS      = os.environ["GMAIL_ADDRESS"].encode('ascii', 'ignore').decode('ascii').strip()
+GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"].encode('ascii', 'ignore').decode('ascii').strip()
 PAPERS_PER_RUN     = int(os.getenv("PAPERS_PER_RUN", "5"))
 TALK_LENGTH        = os.getenv("TALK_LENGTH", "conference")
 LOG_LEVEL          = os.getenv("LOG_LEVEL", "INFO")
