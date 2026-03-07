@@ -28,6 +28,15 @@ export default function RootLayout({
             gtag('config', 'AW-16990114177');
           `}
         </Script>
+        <Script id="gtag-conversion" strategy="afterInteractive">
+          {`
+            gtag('event', 'conversion', {
+              'send_to': 'AW-16990114177/wEmICPjQi4QcEIGjwqU_',
+              'value': 1.0,
+              'currency': 'EUR'
+            });
+          `}
+        </Script>
       </head>
       <body className="antialiased">
         {children}
