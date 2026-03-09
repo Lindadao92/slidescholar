@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Script from "next/script";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import GenerationBanner from "./components/GenerationBanner";
 
@@ -41,6 +42,7 @@ export default function RootLayout({
       <body className="antialiased">
         {children}
         <GenerationBanner />
+        <Analytics />
       </body>
     </html>
   );
