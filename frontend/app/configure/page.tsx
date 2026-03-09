@@ -93,6 +93,7 @@ function ConfigureInner() {
 
   const [subscribed, setSubscribed] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
+  const [showToast, setShowToast] = useState(false);
 
   // Check subscription status on load
   useEffect(() => {
@@ -134,6 +135,8 @@ function ConfigureInner() {
         JSON.stringify({ subscribed: true, email })
       );
       setSubscribed(true);
+      setShowToast(true);
+      setTimeout(() => setShowToast(false), 5000);
       // Clean URL
       window.history.replaceState({}, "", "/configure");
     }
@@ -213,6 +216,15 @@ function ConfigureInner() {
 
   return (
     <div className="min-h-screen bg-gray-50/60">
+      {/* Success toast */}
+      {showToast && (
+        <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 animate-[slideDown_0.3s_ease-out] rounded-xl border border-green-200 bg-green-50 px-6 py-3 shadow-lg">
+          <p className="text-sm font-medium text-green-800">
+            &#127881; Pro unlocked! All talk types available.
+          </p>
+        </div>
+      )}
+
       {/* Top bar */}
       <nav className="border-b border-gray-200 bg-white">
         <div className="mx-auto flex h-14 max-w-3xl items-center justify-between px-4">
