@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import UpgradeModal from "../components/UpgradeModal";
 
 interface ParseResult {
   paper_id?: string;
@@ -63,8 +64,23 @@ const TEMPLATE_STYLES: {
   },
 ];
 
+const FREE_FORMATS: TalkFormat[] = ["lightning"];
+
+function isPro(f: TalkFormat) {
+  return !FREE_FORMATS.includes(f);
+}
+
 export default function ConfigurePage() {
+  return (
+    <Suspense>
+      <ConfigureInner />
+    </Suspense>
+  );
+}
+
+function ConfigureInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [paper, setPaper] = useState<ParseResult | null>(null);
   const [format, setFormat] = useState<TalkFormat>("conference");
@@ -74,6 +90,54 @@ export default function ConfigurePage() {
   const [citations, setCitations] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  const [subscribed, setSubscribed] = useState(false);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+
+  // Check subscription status on load
+  useEffect(() => {
+    const stored = localStorage.getItem("ss_subscription");
+    if (stored) {
+      try {
+        const data = JSON.parse(stored);
+        if (data.subscribed && data.email) {
+          // Verify with Stripe in background
+          fetch(`/api/stripe/subscription-status?email=${encodeURIComponent(data.email)}`)
+            .then((r) => r.json())
+            .then((res) => {
+              if (res.subscribed) {
+                setSubscribed(true);
+              } else {
+                localStorage.removeItem("ss_subscription");
+                setSubscribed(false);
+              }
+            })
+            .catch(() => {
+              // Offline/error — trust localStorage
+              setSubscribed(true);
+            });
+          setSubscribed(true);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
+  // Handle return from Stripe checkout
+  useEffect(() => {
+    const sub = searchParams.get("subscribed");
+    const email = searchParams.get("email");
+    if (sub === "true" && email) {
+      localStorage.setItem(
+        "ss_subscription",
+        JSON.stringify({ subscribed: true, email })
+      );
+      setSubscribed(true);
+      // Clean URL
+      window.history.replaceState({}, "", "/configure");
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const raw = sessionStorage.getItem("parseResult");
@@ -221,21 +285,37 @@ export default function ConfigurePage() {
               Talk Format
             </h2>
             <div className="grid gap-3 sm:grid-cols-3">
-              {TALK_FORMATS.map((f) => (
-                <button
-                  key={f.value}
-                  onClick={() => setFormat(f.value)}
-                  className={`rounded-xl border-2 px-4 py-4 text-left transition-colors ${
-                    format === f.value
-                      ? "border-accent bg-blue-50"
-                      : "border-gray-200 bg-white hover:border-gray-300"
-                  }`}
-                >
-                  <span className="text-xl">{f.icon}</span>
-                  <p className="mt-1 text-sm font-semibold">{f.label}</p>
-                  <p className="text-xs text-gray-400">{f.desc}</p>
-                </button>
-              ))}
+              {TALK_FORMATS.map((f) => {
+                const locked = isPro(f.value) && !subscribed;
+                return (
+                  <button
+                    key={f.value}
+                    onClick={() => {
+                      if (locked) {
+                        setShowUpgrade(true);
+                      } else {
+                        setFormat(f.value);
+                      }
+                    }}
+                    className={`relative rounded-xl border-2 px-4 py-4 text-left transition-colors ${
+                      format === f.value
+                        ? "border-accent bg-blue-50"
+                        : locked
+                          ? "border-gray-200 bg-gray-50 opacity-75 hover:border-gray-300 hover:opacity-100"
+                          : "border-gray-200 bg-white hover:border-gray-300"
+                    }`}
+                  >
+                    {locked && (
+                      <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                        &#x1F512; Pro
+                      </span>
+                    )}
+                    <span className="text-xl">{f.icon}</span>
+                    <p className="mt-1 text-sm font-semibold">{f.label}</p>
+                    <p className="text-xs text-gray-400">{f.desc}</p>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -297,7 +377,13 @@ export default function ConfigurePage() {
 
         {/* Generate button */}
         <button
-          onClick={handleGenerate}
+          onClick={() => {
+            if (isPro(format) && !subscribed) {
+              setShowUpgrade(true);
+            } else {
+              handleGenerate();
+            }
+          }}
           disabled={submitting}
           className="mt-10 flex w-full items-center justify-center rounded-xl bg-accent py-4 text-base font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -313,6 +399,17 @@ export default function ConfigurePage() {
             "Generate My Slides \u2192"
           )}
         </button>
+
+        <UpgradeModal
+          open={showUpgrade}
+          onClose={() => setShowUpgrade(false)}
+          onSubscribed={(email) => {
+            localStorage.setItem(
+              "ss_subscription",
+              JSON.stringify({ subscribed: true, email })
+            );
+          }}
+        />
       </main>
     </div>
   );
