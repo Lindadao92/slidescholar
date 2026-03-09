@@ -13,6 +13,9 @@ export async function POST(req: NextRequest) {
     const appUrl =
       process.env.NEXT_PUBLIC_APP_URL || "https://slidescholar.vercel.app";
 
+    console.log("PRICE ID:", JSON.stringify(process.env.STRIPE_PRICE_ID));
+    console.log("STRIPE KEY prefix:", process.env.STRIPE_SECRET_KEY?.slice(0, 12));
+
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer_email: email,
