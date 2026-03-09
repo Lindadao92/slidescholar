@@ -436,6 +436,10 @@ export default function Home() {
       {/* ================================================================ */}
       <footer className="border-t border-gray-100 px-4 py-8 text-center text-xs text-gray-400">
         Slide<span className="font-semibold text-accent">Scholar</span> &middot; Built for researchers, by researchers.
+        <span className="mx-2">&middot;</span>
+        <a href="mailto:linda@failfasterventures.com" className="text-gray-400 hover:text-accent hover:underline">
+          Customer Support
+        </a>
       </footer>
     </div>
   );

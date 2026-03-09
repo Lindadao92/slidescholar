@@ -237,7 +237,12 @@ function ConfigureInner() {
           <span className="text-lg font-bold tracking-tight">
             Slide<span className="text-accent">Scholar</span>
           </span>
-          <span className="w-12" />
+          <a
+            href="mailto:linda@failfasterventures.com"
+            className="text-sm font-medium text-gray-500 hover:text-foreground"
+          >
+            Support
+          </a>
         </div>
       </nav>
 
