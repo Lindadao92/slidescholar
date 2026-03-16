@@ -5,6 +5,8 @@ import logging
 import os
 import re
 import shutil
+import subprocess
+import tempfile
 import threading
 import time
 import uuid
@@ -51,6 +53,36 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def _convert_pptx_to_pdf(pptx_path: str) -> bytes:
+    """Convert a .pptx file to PDF using LibreOffice.
+
+    Returns the PDF bytes. Raises RuntimeError if conversion fails.
+    """
+    out_dir = tempfile.mkdtemp(prefix="slidescholar_pdf_")
+    try:
+        result = subprocess.run(
+            [
+                "libreoffice", "--headless", "--convert-to", "pdf",
+                "--outdir", out_dir, pptx_path,
+            ],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            log.error("LibreOffice conversion failed: %s", result.stderr)
+            raise RuntimeError(f"PDF conversion failed: {result.stderr[:200]}")
+
+        # Find the output PDF
+        pdf_name = Path(pptx_path).stem + ".pdf"
+        pdf_path = os.path.join(out_dir, pdf_name)
+        if not os.path.isfile(pdf_path):
+            raise RuntimeError("PDF conversion produced no output file")
+
+        with open(pdf_path, "rb") as f:
+            return f.read()
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
+
 
 # --- In-memory session store ---
 # Maps paper_id -> {"parsed": dict, "session_dir": str}
@@ -410,12 +442,30 @@ async def get_figure(paper_id: str, filename: str):
 
 
 @app.get("/api/download/{file_id}")
-async def download_file(file_id: str):
-    """Download a generated .pptx file."""
+async def download_file(file_id: str, format: str = "pptx"):
+    """Download a generated presentation file.
+
+    Query params:
+        format: "pptx" (default) or "pdf"
+    """
     # Search all sessions for the file_id
     for session in _sessions.values():
         file_path = session.get("files", {}).get(file_id)
         if file_path and os.path.isfile(file_path):
+            if format.lower() == "pdf":
+                try:
+                    pdf_bytes = _convert_pptx_to_pdf(file_path)
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=500, detail=f"PDF conversion failed: {exc}"
+                    )
+                return StreamingResponse(
+                    io.BytesIO(pdf_bytes),
+                    media_type="application/pdf",
+                    headers={
+                        "Content-Disposition": 'attachment; filename="slidescholar_presentation.pdf"',
+                    },
+                )
             return FileResponse(
                 path=file_path,
                 media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -431,10 +481,14 @@ async def rebuild_presentation(request: Request):
 
     This avoids temp-file expiration issues: the file is built in a
     temporary location, read into memory, and streamed in one request.
+
+    Query params:
+        format: "pptx" (default) or "pdf"
     """
     data = await request.json()
     slide_plan = data.get("slide_plan")
     paper_id = data.get("paper_id")
+    output_format = data.get("format", "pptx").lower()
 
     if not slide_plan:
         raise HTTPException(status_code=400, detail="No slide_plan provided")
@@ -454,7 +508,6 @@ async def rebuild_presentation(request: Request):
         slide_plan["authors"] = parsed.get("authors", "")
 
     # Build into a temp file, then stream the bytes directly
-    import tempfile
     tmp = tempfile.NamedTemporaryFile(suffix=".pptx", delete=False)
     tmp_path = tmp.name
     tmp.close()
@@ -465,8 +518,16 @@ async def rebuild_presentation(request: Request):
             figures=parsed.get("figures", []),
             output_path=tmp_path,
         )
-        with open(tmp_path, "rb") as f:
-            content = f.read()
+
+        if output_format == "pdf":
+            content = _convert_pptx_to_pdf(tmp_path)
+            media_type = "application/pdf"
+            filename = "slidescholar_presentation.pdf"
+        else:
+            with open(tmp_path, "rb") as f:
+                content = f.read()
+            media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            filename = "slidescholar_presentation.pptx"
     except Exception as exc:
         log.exception("Rebuild failed")
         raise HTTPException(status_code=500, detail=f"Rebuild failed: {exc}")
@@ -480,9 +541,9 @@ async def rebuild_presentation(request: Request):
     buffer = io.BytesIO(content)
     return StreamingResponse(
         buffer,
-        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        media_type=media_type,
         headers={
-            "Content-Disposition": 'attachment; filename="slidescholar_presentation.pptx"',
+            "Content-Disposition": f'attachment; filename="{filename}"',
         },
     )
 

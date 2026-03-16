@@ -481,6 +481,7 @@ export default function PreviewPage() {
   const [selected, setSelected] = useState(0);
   const [hasEdits, setHasEdits] = useState(false);
   const [isRebuilding, setIsRebuilding] = useState(false);
+  const [isConvertingPdf, setIsConvertingPdf] = useState(false);
   const [downloadError, setDownloadError] = useState("");
   const [draftNotes, setDraftNotes] = useState("");
   const mainCountRef = useRef(0);
@@ -655,6 +656,76 @@ export default function PreviewPage() {
     }
   }, [hasEdits, downloadUrl, slidePlan, paperId]);
 
+  /* ---- Download as PDF ---- */
+  const handleDownloadPdf = useCallback(async () => {
+    setDownloadError("");
+
+    if (!hasEdits && downloadUrl) {
+      // No edits: use the direct download endpoint with format=pdf
+      setIsConvertingPdf(true);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120_000);
+      try {
+        const sep = downloadUrl.includes("?") ? "&" : "?";
+        const res = await fetch(resolveUrl(`${downloadUrl}${sep}format=pdf`), { signal: controller.signal });
+        if (!res.ok) throw new Error(`PDF conversion failed (${res.status})`);
+        const blob = await res.blob();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "slidescholar_presentation.pdf";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          setDownloadError("PDF conversion timed out. Please try again.");
+        } else {
+          setDownloadError("PDF download failed. Please try again.");
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        setIsConvertingPdf(false);
+      }
+      return;
+    }
+
+    if (!slidePlan || !paperId) {
+      setDownloadError("Session expired. Please go back and regenerate.");
+      return;
+    }
+
+    // Has edits: rebuild with format=pdf
+    setIsConvertingPdf(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120_000);
+    try {
+      const res = await fetch(`${API_BASE}/api/rebuild`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slide_plan: slidePlan, paper_id: paperId, format: "pdf" }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "PDF conversion failed" }));
+        throw new Error(err.detail || "PDF conversion failed");
+      }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "slidescholar_presentation.pdf";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setDownloadError("PDF conversion timed out. Please try again.");
+      } else {
+        setDownloadError(`PDF download failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      setIsConvertingPdf(false);
+    }
+  }, [hasEdits, downloadUrl, slidePlan, paperId]);
+
   // Ref for keyboard handler to access latest handleDownload
   const downloadRef = useRef(handleDownload);
   useEffect(() => { downloadRef.current = handleDownload; }, [handleDownload]);
@@ -711,13 +782,22 @@ export default function PreviewPage() {
             </span>
           )}
         </div>
-        <button
-          onClick={handleDownload}
-          disabled={isRebuilding}
-          className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {isRebuilding ? "Building..." : "\u2193 Download .pptx"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDownload}
+            disabled={isRebuilding || isConvertingPdf}
+            className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isRebuilding ? "Building..." : "\u2193 .pptx"}
+          </button>
+          <button
+            onClick={handleDownloadPdf}
+            disabled={isRebuilding || isConvertingPdf}
+            className="flex items-center gap-1.5 rounded-lg border border-accent px-4 py-2 text-sm font-semibold text-accent transition-opacity hover:bg-accent/5 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isConvertingPdf ? "Converting..." : "\u2193 .pdf"}
+          </button>
+        </div>
       </nav>
 
       {/* Download error banner */}
