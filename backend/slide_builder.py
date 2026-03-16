@@ -1366,6 +1366,16 @@ LAYOUT_MAP = {
     "comparison": "table",
     "conclusion": "content",
     "thankyou": "thankyou",
+    # Survey / literature-review types
+    "taxonomy": "content",
+    "research_gaps": "content",
+    # Theory paper types
+    "formulation": "content",
+    "proof": "content",
+    "implications": "content",
+    # Position paper types
+    "position": "content",
+    "argument": "content",
     # Backup slide types
     "backup": "content",
     "backup_methodology": "content",

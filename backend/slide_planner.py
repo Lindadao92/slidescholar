@@ -54,6 +54,18 @@ def _get_slide_range(minutes: int) -> dict:
     return SLIDE_RANGES[60]
 
 
+# Words too common to signal relevance in keyword matching
+_STOPWORDS = frozenset(
+    "the a an is are was were be been being have has had do does did will would "
+    "could should may might can shall to of in for on with at by from as into "
+    "through during before after above below between and but or not no so if "
+    "than that this these those it its we our they their each all both such "
+    "only also very more most other some new using used based show shows shown "
+    "figure fig table tab results method approach proposed paper model models "
+    "data dataset performance our which where when how what".split()
+)
+
+
 def _estimate_content_density(paper: dict) -> int:
     """Score paper complexity to determine where within the slide range to land.
 
@@ -95,17 +107,32 @@ def _estimate_content_density(paper: dict) -> int:
     return max(0, score)
 
 
-def _count_experiments(paper: dict) -> int:
-    """Count distinct experiment/result sections in the paper.
+def _count_experiments(paper: dict) -> dict:
+    """Count distinct experiments in a paper using multiple heuristic signals.
 
-    Uses multiple signals:
-    1. Section names with experiment keywords
-    2. Sections containing significant quantitative content
-    3. Figure count as a floor (papers with many figures have many findings)
+    Returns:
+        {
+            "count": int,          # best-estimate experiment count
+            "confidence": float,   # 0.0-1.0, how much to trust the count
+            "signals": dict,       # per-signal breakdown for debugging
+        }
+
+    Signals (scored independently, then merged):
+      1. Section names with experiment/result keywords
+      2. Sections with significant quantitative content
+      3. Numbered experiment labels (Experiment 1, Study 2, RQ1, etc.)
+      4. Ablation study mentions (each distinct ablation = ~1 experiment)
+      5. Distinct dataset names appearing in results context
+      6. Baseline comparison tables ("Table N" with comparison keywords)
+      7. Figure count floor (every ~5 figures ≈ 1 experiment)
     """
     sections = paper.get("sections", [])
+    full_text = "\n".join(sec.get("text", "") for sec in sections)
+    full_lower = full_text.lower()
 
-    # Signal 1: Section names
+    # ------------------------------------------------------------------
+    # Signal 1: Section names with experiment keywords
+    # ------------------------------------------------------------------
     name_keywords = {"experiment", "case study", "evaluation", "result",
                      "analysis", "ablation", "study", "finding",
                      "benchmark", "comparison", "performance"}
@@ -115,26 +142,521 @@ def _count_experiments(paper: dict) -> int:
         if any(kw in name_lower for kw in name_keywords):
             name_count += 1
 
-    # Signal 2: Sections with quantitative content (tables, figures, numbers)
+    # ------------------------------------------------------------------
+    # Signal 2: Sections with significant quantitative content
+    # ------------------------------------------------------------------
     quant_keywords = {"table ", "figure ", "fig.", "tab.", "accuracy", "precision",
                       "recall", "f1", "bleu", "rouge", "auc", "error rate",
                       "outperform", "baseline", "state-of-the-art", "sota",
                       "compared to", "improvement", "versus", "vs."}
     text_count = 0
     for sec in sections:
-        text_lower = sec.get("text", "").lower()[:2000]  # first 2000 chars
+        text_lower = sec.get("text", "").lower()[:2000]
         matches = sum(1 for kw in quant_keywords if kw in text_lower)
-        if matches >= 3:  # significant quantitative content
+        if matches >= 3:
             text_count += 1
 
-    # Signal 3: Figure-based floor (every ~5 figures suggests ~1 experiment)
+    # ------------------------------------------------------------------
+    # Signal 3: Numbered experiment labels
+    # Matches: Experiment 1, Study 2, RQ1, RQ 3, Case Study 4, Task 2
+    # ------------------------------------------------------------------
+    label_patterns = [
+        r"experiment\s*(\d+)",
+        r"study\s*(\d+)",
+        r"case\s+study\s*(\d+)",
+        r"rq\s*(\d+)",
+        r"task\s+(\d+)(?=\s*[:\.\)])",    # "Task 2:" but not "task 200 epochs"
+        r"setting\s*(\d+)",
+    ]
+    label_nums: set[str] = set()
+    for pat in label_patterns:
+        for m in re.finditer(pat, full_lower):
+            label_nums.add(f"{pat.split('(')[0].strip()}_{m.group(1)}")
+    label_count = len(label_nums)
+
+    # ------------------------------------------------------------------
+    # Signal 4: Ablation study mentions
+    # Each distinctly named ablation ≈ 1 sub-experiment.
+    # Look for "w/o X", "without X", "removing X", "-X" (ablation rows)
+    # ------------------------------------------------------------------
+    ablation_variants: set[str] = set()
+    for m in re.finditer(
+        r"(?:w/o|without|removing|ablating|no)\s+([a-z][a-z\s]{2,20}?)(?=[,\.\;\)\n])",
+        full_lower,
+    ):
+        # Normalise to first two words to deduplicate "attention" vs "attention mechanism"
+        words = m.group(1).strip().split()[:2]
+        ablation_variants.add(" ".join(words))
+    ablation_count = len(ablation_variants)
+
+    # ------------------------------------------------------------------
+    # Signal 5: Distinct dataset names in results context
+    # Well-known benchmark datasets and repeated capitalised names
+    # near results/evaluation text.
+    # ------------------------------------------------------------------
+    known_datasets = {
+        "imagenet", "cifar", "cifar-10", "cifar-100", "mnist",
+        "coco", "voc", "pascal",
+        "squad", "glue", "superglue", "mnli", "sst", "sst-2", "qqp",
+        "wmt", "iwslt", "newstest",
+        "conll", "ontonotes", "penn treebank", "ptb",
+        "librispeech", "commonvoice",
+        "imdb", "yelp", "amazon",
+        "openwebtext", "c4", "pile",
+    }
+    # Scan the results-relevant sections (sections mentioning results keywords)
+    results_text = ""
+    for sec in sections:
+        n = sec.get("name", "").lower()
+        if any(kw in n for kw in {"result", "experiment", "evaluation", "benchmark",
+                                   "comparison", "ablation"}):
+            results_text += " " + sec.get("text", "")
+    if not results_text:
+        results_text = full_text  # fallback: whole paper
+
+    results_lower = results_text.lower()
+    found_datasets: set[str] = set()
+    for ds in known_datasets:
+        if ds in results_lower:
+            found_datasets.add(ds)
+
+    # Also look for capitalised multi-word names appearing 3+ times
+    # near quantitative keywords — likely custom dataset or benchmark names.
+    cap_names = re.findall(r"\b([A-Z][A-Za-z]+-?[A-Z0-9][A-Za-z0-9]*)\b", results_text)
+    for name in set(cap_names):
+        if cap_names.count(name) >= 3 and name.lower() not in _STOPWORDS:
+            found_datasets.add(name.lower())
+
+    dataset_count = len(found_datasets)
+
+    # ------------------------------------------------------------------
+    # Signal 6: Baseline comparison tables
+    # Count "Table N" references co-occurring with comparison language.
+    # ------------------------------------------------------------------
+    table_refs = set(re.findall(r"(?:table|tab\.?)\s*(\d+)", full_lower))
+    comparison_near_table = 0
+    compare_words = {"compar", "baseline", "benchmark", "state-of-the-art",
+                     "sota", "outperform", "surpass", "exceed", "ablat"}
+    for tnum in table_refs:
+        # Check a 500-char window around each "Table N" mention
+        for m in re.finditer(rf"(?:table|tab\.?)\s*{tnum}", full_lower):
+            window = full_lower[max(0, m.start() - 250):m.end() + 250]
+            if any(cw in window for cw in compare_words):
+                comparison_near_table += 1
+                break  # count each table once
+    comparison_table_count = comparison_near_table
+
+    # ------------------------------------------------------------------
+    # Signal 7: Figure count floor
+    # ------------------------------------------------------------------
     n_figures = paper.get("num_figures", len(paper.get("figures", [])))
     figure_floor = max(3, n_figures // 5)
 
-    count = max(name_count, text_count, figure_floor)
-    log.info("Experiment count: name=%d, text=%d, figure_floor=%d → %d",
-             name_count, text_count, figure_floor, count)
-    return count
+    # ------------------------------------------------------------------
+    # Merge signals into a single count
+    # ------------------------------------------------------------------
+    # Each signal estimates experiment count from a different angle.
+    # We take the MAX of "strong" signals (the most sensitive detector),
+    # since we'd rather over-count than miss experiments.
+    # Weak signals (ablation halved, figure floor) only matter as a floor.
+
+    # Strong signals — each directly estimates experiment count
+    strong: list[tuple[int, float]] = []  # (count, reliability_weight)
+
+    if label_count >= 2:        # Numbered labels: most reliable
+        strong.append((label_count, 3.0))
+    if name_count >= 1:         # Section names
+        strong.append((name_count, 2.0))
+    if text_count >= 1:         # Quantitative sections
+        strong.append((text_count, 1.5))
+    if comparison_table_count >= 2:  # Comparison tables (1 is ubiquitous)
+        strong.append((comparison_table_count, 1.5))
+    if dataset_count >= 3:      # Distinct datasets (2 is common even in short papers)
+        strong.append((dataset_count, 1.0))
+
+    # Weak / supplementary signals — set a floor, don't drive the count
+    weak_floor = figure_floor   # always ≥ 3
+    if ablation_count >= 2:
+        weak_floor = max(weak_floor, max(1, ablation_count // 2))
+
+    if strong:
+        # Primary count = max of strong signals (most sensitive detector).
+        # Check with weighted average: if average is much lower, the max
+        # might be an outlier — pull it down slightly.
+        max_strong = max(c for c, _ in strong)
+        total_w = sum(w for _, w in strong)
+        weighted_avg = sum(c * w for c, w in strong) / total_w
+        # Blend: 70% max, 30% weighted average — favour the highest signal
+        blended = max_strong * 0.7 + weighted_avg * 0.3
+        count = max(3, min(20, round(blended)))
+        # Never go below the weak floor
+        count = max(count, weak_floor)
+    else:
+        count = max(3, min(20, weak_floor))
+
+    # ------------------------------------------------------------------
+    # Confidence: how much do the signals agree?
+    # ------------------------------------------------------------------
+    # High confidence: multiple strong signals with similar values.
+    # Low confidence: signals disagree widely, or only weak signals fire.
+    strong_values = [c for c, _ in strong]
+
+    if len(strong_values) >= 3:
+        mean_val = sum(strong_values) / len(strong_values)
+        if mean_val > 0:
+            variance = sum((v - mean_val) ** 2 for v in strong_values) / len(strong_values)
+            cv = (variance ** 0.5) / mean_val  # coefficient of variation
+            agreement = max(0.0, 1.0 - cv * 0.7)
+        else:
+            agreement = 0.3
+        # Breadth bonus: more independent signals = more trustworthy
+        breadth = min(1.0, len(strong_values) / 5)
+        # Magnitude factor: signals with small values (1-2) are weaker
+        # evidence than signals with larger values (4+).  When no signal
+        # exceeds the floor (3), the count is essentially guesswork.
+        max_val = max(strong_values)
+        magnitude = min(1.0, max_val / 5)  # full credit at 5+
+        confidence = round(0.20 * agreement + 0.35 * breadth + 0.45 * magnitude, 2)
+    elif len(strong_values) == 2:
+        # Two signals: confidence depends on agreement and magnitude
+        diff = abs(strong_values[0] - strong_values[1])
+        avg = (strong_values[0] + strong_values[1]) / 2
+        agreement = max(0.0, 1.0 - (diff / max(avg, 1)) * 0.5)
+        magnitude = min(1.0, max(strong_values) / 4)
+        confidence = round(0.15 + 0.20 * agreement + 0.15 * magnitude, 2)
+    elif len(strong_values) == 1:
+        magnitude = min(1.0, strong_values[0] / 4)
+        confidence = round(0.20 + 0.15 * magnitude, 2)
+    else:
+        confidence = 0.15  # only weak signals (figure floor)
+
+    confidence = max(0.1, min(1.0, confidence))
+
+    signals = {
+        "name_sections": name_count,
+        "quant_sections": text_count,
+        "numbered_labels": label_count,
+        "ablation_variants": ablation_count,
+        "datasets_found": dataset_count,
+        "comparison_tables": comparison_table_count,
+        "figure_floor": figure_floor,
+    }
+    log.info(
+        "Experiment count: %d (confidence=%.2f) signals=%s",
+        count, confidence, signals,
+    )
+    return {"count": count, "confidence": confidence, "signals": signals}
+
+
+# =============================================================
+# PAPER-TYPE CLASSIFICATION
+# =============================================================
+
+# Each paper type gets a different narrative arc and budget strategy.
+PAPER_TYPES = {
+    "empirical": {
+        "label": "empirical research paper",
+        "arc": [
+            ("title", 1),
+            ("motivation", "budget_motivation"),
+            ("method", "budget_method"),
+            ("results", "budget_results"),
+            ("analysis", "budget_analysis"),
+            ("conclusion", 1),
+            ("thankyou", 1),
+        ],
+    },
+    "survey": {
+        "label": "survey / literature review",
+        "arc": [
+            ("title", 1),
+            ("motivation", "budget_motivation"),
+            ("taxonomy", "budget_taxonomy"),
+            ("comparison", "budget_comparison"),
+            ("research_gaps", "budget_gaps"),
+            ("conclusion", 1),
+            ("thankyou", 1),
+        ],
+    },
+    "theory": {
+        "label": "theoretical / mathematical paper",
+        "arc": [
+            ("title", 1),
+            ("motivation", "budget_motivation"),
+            ("formulation", "budget_formulation"),
+            ("proof", "budget_proof"),
+            ("implications", "budget_implications"),
+            ("conclusion", 1),
+            ("thankyou", 1),
+        ],
+    },
+    "position": {
+        "label": "position / opinion paper",
+        "arc": [
+            ("title", 1),
+            ("motivation", "budget_motivation"),
+            ("argument", "budget_argument"),
+            ("analysis", "budget_analysis"),
+            ("conclusion", 1),
+            ("thankyou", 1),
+        ],
+    },
+}
+
+
+def classify_paper_type(paper: dict) -> dict:
+    """Classify a paper into one of: empirical, survey, theory, position.
+
+    Uses section names, content signals, and structural features to score
+    each type. Returns the best match with a confidence score.
+
+    Returns:
+        {
+            "type": str,            # "empirical" | "survey" | "theory" | "position"
+            "confidence": float,    # 0.0-1.0
+            "scores": dict,         # per-type raw scores for debugging
+        }
+    """
+    sections = paper.get("sections", [])
+    section_names = [sec.get("name", "").lower() for sec in sections]
+    full_text = "\n".join(sec.get("text", "") for sec in sections).lower()
+    n_sections = len(sections)
+    n_pages = paper.get("num_pages", 10)
+    n_figures = paper.get("num_figures", len(paper.get("figures", [])))
+
+    # ------------------------------------------------------------------
+    # Score each paper type independently
+    # ------------------------------------------------------------------
+    scores: dict[str, float] = {"empirical": 0, "survey": 0, "theory": 0, "position": 0}
+
+    # --- Empirical signals ---
+    experiment_names = {"experiment", "evaluation", "result", "ablation",
+                        "benchmark", "baseline", "performance"}
+    method_names = {"method", "approach", "architecture", "model", "system",
+                    "framework", "implementation"}
+    for name in section_names:
+        if any(kw in name for kw in experiment_names):
+            scores["empirical"] += 2.0
+        if any(kw in name for kw in method_names):
+            scores["empirical"] += 1.0
+    # Quantitative language in body
+    quant_terms = ["accuracy", "precision", "recall", "f1", "bleu", "rouge",
+                   "outperform", "baseline", "state-of-the-art", "sota",
+                   "table ", "fig.", "figure "]
+    quant_hits = sum(1 for t in quant_terms if t in full_text)
+    scores["empirical"] += min(quant_hits * 0.5, 5.0)
+    if n_figures >= 3:
+        scores["empirical"] += 1.0
+
+    # --- Survey signals ---
+    survey_names = {"related work", "literature review", "survey", "taxonomy",
+                    "categorization", "classification of", "overview of"}
+    for name in section_names:
+        if any(kw in name for kw in survey_names):
+            scores["survey"] += 3.0
+    # Many citation patterns: "[N]" or "(Author, Year)" — surveys are citation-dense
+    bracket_citations = len(re.findall(r"\[\d+(?:,\s*\d+)*\]", full_text))
+    paren_citations = len(re.findall(r"\([A-Z][a-z]+(?:\s+et\s+al\.?)?,\s*\d{4}\)", full_text))
+    total_citations = bracket_citations + paren_citations
+    if total_citations > 80:
+        scores["survey"] += 3.0
+    elif total_citations > 40:
+        scores["survey"] += 1.5
+    # Surveys tend to have many sections and few figures
+    if n_sections >= 8 and n_figures <= 3:
+        scores["survey"] += 1.0
+    # Penalty: surveys rarely have experiment/evaluation sections
+    has_experiments = any(any(kw in name for kw in experiment_names) for name in section_names)
+    if not has_experiments:
+        scores["survey"] += 1.0
+
+    # --- Theory signals ---
+    theory_names = {"theorem", "proof", "lemma", "proposition", "corollary",
+                    "theoretical", "convergence", "bound", "complexity analysis"}
+    for name in section_names:
+        if any(kw in name for kw in theory_names):
+            scores["theory"] += 3.0
+    # Theorem/proof language in body
+    theory_body = ["theorem", "\\begin{proof}", "q.e.d.", "∎", "lemma",
+                   "proposition", "corollary", "we prove", "it follows that",
+                   "by induction", "necessary and sufficient"]
+    theory_hits = sum(1 for t in theory_body if t in full_text)
+    scores["theory"] += min(theory_hits * 0.8, 5.0)
+    # Equation-heavy (LaTeX markers)
+    equation_markers = len(re.findall(r"\\begin\{(?:equation|align|gather)\}", full_text))
+    if equation_markers >= 3:
+        scores["theory"] += 2.0
+    # Penalty: theory papers rarely have many figures or experiment sections
+    if not has_experiments and n_figures <= 3:
+        scores["theory"] += 1.0
+
+    # --- Position paper signals ---
+    position_names = {"opinion", "perspective", "vision", "position",
+                      "call to action", "manifesto", "commentary", "editorial"}
+    for name in section_names:
+        if any(kw in name for kw in position_names):
+            scores["position"] += 3.0
+    # Short papers with no method/experiment sections
+    if n_pages <= 6:
+        scores["position"] += 1.0
+    if not has_experiments:
+        scores["position"] += 1.0
+    no_method = not any(any(kw in name for kw in method_names) for name in section_names)
+    if no_method:
+        scores["position"] += 1.0
+    # Opinion language
+    opinion_terms = ["we argue", "we believe", "we propose that",
+                     "we advocate", "we call for", "in our view",
+                     "should be", "ought to", "it is time"]
+    opinion_hits = sum(1 for t in opinion_terms if t in full_text)
+    scores["position"] += min(opinion_hits * 1.0, 4.0)
+
+    # ------------------------------------------------------------------
+    # Pick the winner
+    # ------------------------------------------------------------------
+    best_type = max(scores, key=scores.get)  # type: ignore[arg-type]
+    best_score = scores[best_type]
+
+    # Confidence: how much does the winner lead?
+    sorted_scores = sorted(scores.values(), reverse=True)
+    if best_score == 0:
+        confidence = 0.2
+    elif len(sorted_scores) >= 2 and sorted_scores[1] > 0:
+        margin = (best_score - sorted_scores[1]) / best_score
+        confidence = round(0.3 + 0.7 * min(margin, 1.0), 2)
+    else:
+        confidence = 0.8
+
+    # If confidence is low (< 0.4), default to empirical — safest fallback
+    if confidence < 0.4 and best_type != "empirical":
+        # Check if empirical is a close second
+        if scores["empirical"] >= best_score * 0.6:
+            best_type = "empirical"
+            confidence = 0.3
+
+    log.info("Paper type: %s (confidence=%.2f) scores=%s", best_type, confidence, scores)
+    return {"type": best_type, "confidence": confidence, "scores": scores}
+
+
+def _allocate_budget_survey(main_slides: int) -> dict:
+    """Budget for survey papers: taxonomy-heavy, no experiments."""
+    fixed = 3  # title + conclusion + thankyou
+    available = max(1, main_slides - fixed)
+
+    # Surveys spend most time on taxonomy and comparison
+    motivation = 1
+    taxonomy = max(2, available // 3)
+    comparison = max(2, available // 3)
+    gaps = max(1, available - motivation - taxonomy - comparison)
+
+    # Rebalance if over budget
+    total = motivation + taxonomy + comparison + gaps
+    while total > available and gaps > 1:
+        gaps -= 1
+        total -= 1
+    while total > available and taxonomy > 2:
+        taxonomy -= 1
+        total -= 1
+
+    return {
+        "motivation": motivation,
+        "taxonomy": taxonomy,
+        "comparison": comparison,
+        "gaps": gaps,
+    }
+
+
+def _allocate_budget_theory(main_slides: int) -> dict:
+    """Budget for theory papers: formulation + proof heavy."""
+    fixed = 3  # title + conclusion + thankyou
+    available = max(1, main_slides - fixed)
+
+    motivation = max(1, min(2, available // 4))
+    formulation = max(1, available // 3)
+    proof = max(1, available // 3)
+    implications = max(1, available - motivation - formulation - proof)
+
+    total = motivation + formulation + proof + implications
+    while total > available and implications > 1:
+        implications -= 1
+        total -= 1
+    while total > available and motivation > 1:
+        motivation -= 1
+        total -= 1
+
+    return {
+        "motivation": motivation,
+        "formulation": formulation,
+        "proof": proof,
+        "implications": implications,
+    }
+
+
+def _allocate_budget_position(main_slides: int) -> dict:
+    """Budget for position papers: argument-heavy, short."""
+    fixed = 3  # title + conclusion + thankyou
+    available = max(1, main_slides - fixed)
+
+    motivation = max(1, min(2, available // 3))
+    argument = max(2, (available * 2) // 3)
+    analysis = max(1, available - motivation - argument)
+
+    total = motivation + argument + analysis
+    while total > available and analysis > 1:
+        analysis -= 1
+        total -= 1
+
+    return {
+        "motivation": motivation,
+        "argument": argument,
+        "analysis": analysis,
+    }
+
+
+# Descriptions for each arc section — used to generate the narrative arc text
+_ARC_DESCRIPTIONS: dict[str, str] = {
+    "title": "Title slide (paper title — exception to assertion rule)",
+    "motivation": "Motivation: State the problem and why it matters as an assertion",
+    "method": "Method: Architecture/approach as assertion claims",
+    "results": "Results: Each result as an assertion with evidence",
+    "analysis": "Analysis: Ablation, visualization, generalization",
+    "conclusion": "Conclusion: Executive summary of proven claims",
+    "thankyou": "Thank you",
+    # Survey arc
+    "taxonomy": "Taxonomy: Categorize the landscape into clear groups with visual overview",
+    "comparison": "Comparison: Compare approaches/methods with tables and figures",
+    "research_gaps": "Research Gaps: Identify open problems and missing coverage",
+    # Theory arc
+    "formulation": "Formulation: Define the problem mathematically with key equations",
+    "proof": "Proof / Derivation: Walk through the main theoretical results step by step",
+    "implications": "Implications: What the theoretical results mean in practice",
+    # Position arc
+    "argument": "Argument: Present the core claims with supporting evidence",
+}
+
+
+def _build_narrative_arc(paper_type: str, budget: dict) -> str:
+    """Build the narrative arc text for the system prompt.
+
+    Returns a numbered list like:
+        1. Title slide (paper title — exception to assertion rule)
+        2. Motivation (1-2 slides): State the problem ...
+        ...
+    """
+    arc_spec = PAPER_TYPES[paper_type]["arc"]
+    lines = []
+    step = 1
+    for section_name, count_key in arc_spec:
+        desc = _ARC_DESCRIPTIONS.get(section_name, section_name.title())
+        if isinstance(count_key, int):
+            # Fixed count (title, conclusion, thankyou)
+            lines.append(f"{step}. {desc}")
+        else:
+            # Variable count from budget
+            n = budget.get(count_key.replace("budget_", ""), 1)
+            lines.append(f"{step}. {desc} ({n} slide{'s' if n > 1 else ''})")
+        step += 1
+    return "\n".join(lines)
 
 
 def _calculate_slide_count(minutes: int, paper: dict) -> dict:
@@ -156,7 +678,9 @@ def _calculate_slide_count(minutes: int, paper: dict) -> dict:
     backup_min, backup_max = ranges["backup"]
 
     density = _estimate_content_density(paper)
-    n_experiments = _count_experiments(paper)
+    exp_result = _count_experiments(paper)
+    n_experiments = exp_result["count"]
+    exp_confidence = exp_result["confidence"]
 
     # Map density to position within the range
     if density <= 5:
@@ -167,10 +691,13 @@ def _calculate_slide_count(minutes: int, paper: dict) -> dict:
         frac = (density - 5) / 8.0
         main_target = int(main_min + frac * (main_max - main_min))
 
-    # Ensure at least 60% of experiments can be covered
+    # Ensure at least 60% of experiments can be covered.
+    # When confidence is low, be conservative — require fewer dedicated
+    # result slides so we don't over-allocate on a shaky estimate.
+    coverage_pct = 0.4 + 0.2 * exp_confidence  # 0.4 at low conf → 0.6 at high
     fixed = 3  # title + conclusion + thankyou
     non_results = 3  # motivation(1) + method(1) + analysis(1) minimum
-    min_results_slides = max(2, int(n_experiments * 0.6))
+    min_results_slides = max(2, int(n_experiments * coverage_pct))
     min_main_needed = fixed + non_results + min_results_slides
     main_target = max(main_target, min(min_main_needed, main_max))
 
@@ -178,8 +705,10 @@ def _calculate_slide_count(minutes: int, paper: dict) -> dict:
     uncovered = max(0, n_experiments - min_results_slides)
     backup_target = max(backup_min, min(backup_max, uncovered + 3))
 
-    log.info("Slide count: %d-min talk, density=%d, experiments=%d → %d main + %d backup",
-             minutes, density, n_experiments, main_target, backup_target)
+    log.info("Slide count: %d-min talk, density=%d, experiments=%d (conf=%.2f) "
+             "→ %d main + %d backup",
+             minutes, density, n_experiments, exp_confidence,
+             main_target, backup_target)
 
     return {
         "main_slides": main_target,
@@ -187,6 +716,7 @@ def _calculate_slide_count(minutes: int, paper: dict) -> dict:
         "content_density": density,
         "time_slot_minutes": minutes,
         "n_experiments": n_experiments,
+        "experiment_confidence": exp_confidence,
     }
 
 
@@ -202,7 +732,9 @@ def _allocate_slide_budget(main_slides: int, paper: dict) -> dict:
     """
     fixed = 3  # title + conclusion + thankyou
     available = max(1, main_slides - fixed)
-    n_experiments = _count_experiments(paper)
+    exp_result = _count_experiments(paper)
+    n_experiments = exp_result["count"]
+    exp_confidence = exp_result["confidence"]
 
     # --- STEP 1: Set minimums for non-results ---
     motivation_slides = 1
@@ -213,8 +745,10 @@ def _allocate_slide_budget(main_slides: int, paper: dict) -> dict:
     # --- STEP 2: Give everything else to results ---
     results_slides = max(2, available - non_results_min)
 
-    # Cap results at number of experiments (no empty result slides)
-    results_slides = min(results_slides, n_experiments)
+    # Cap results at number of experiments.  When confidence is low the
+    # count may be inflated, so use a softer cap to avoid over-allocating.
+    cap = n_experiments if exp_confidence >= 0.5 else max(3, int(n_experiments * 0.75))
+    results_slides = min(results_slides, cap)
 
     # --- STEP 3: Distribute leftover to non-results via round-robin ---
     used = results_slides + non_results_min
@@ -412,15 +946,49 @@ Examples:
 
 The ONLY exceptions: slide 1 (paper title) and the last slide (thank-you).
 
-### Rule 2: Layout Selection
-Every slide (except title and thankyou) MUST specify a "layout" field:
+### Rule 2: Layout Selection (MANDATORY DECISION HIERARCHY)
+Every slide (except title and thankyou) MUST specify a "layout" field.
+Choose the layout by following this decision tree IN ORDER — use the \
+FIRST rule that matches. Do NOT skip ahead to "bullets".
+
+STEP 1 → Does the slide reference an available figure from the paper?
+  YES → layout: "hero_figure". Full stop. Do NOT convert it to bullets.
+
+STEP 2 → Does the slide present numerical comparisons across 3+ \
+conditions, models, or experiments?
+  YES → layout: "hero_table" with table_data (≥3 data rows). \
+Never summarize a table as bullet points.
+
+STEP 3 → Does the slide highlight ONE dramatic headline metric \
+(the paper's single most memorable number)?
+  YES → layout: "key_number". Exactly one per presentation.
+
+STEP 4 → Does the slide explain a mathematical formulation?
+  YES → layout: "equation" with equation_latex and annotations.
+
+STEP 5 → ONLY if none of the above apply → layout: "bullets".
+
+NEGATIVE RULES (NON-NEGOTIABLE):
+- NEVER use "bullets" when a relevant figure exists in AVAILABLE FIGURES. \
+Use "hero_figure" instead.
+- NEVER use "bullets" to describe numerical results that could be a table. \
+Use "hero_table" instead — even a 3-row comparison table is better than \
+bullets listing numbers.
+- NEVER use "bullets" for a slide that has a figure_reference field. \
+If figure_reference is set, layout MUST be "hero_figure".
+- NEVER use "bullets" for a slide whose content includes ≥3 numerical \
+comparisons (accuracy, BLEU, F1, speedup, etc.). Use "hero_table".
+- Maximum 2 "bullets" slides in the ENTIRE presentation. If you already \
+have 2, every remaining slide MUST use a visual layout.
+
+Layout definitions:
 - "hero_figure": Large centered figure (60%+ of slide) with 2-4 annotations
-- "hero_table": Full-width table with optional table_headline and context_line
+- "hero_table": Full-width table with table_headline and context_line
 - "key_number": One large number with context (for the headline metric)
 - "equation": Centered equation with annotations explaining each term
-- "bullets": Traditional bullet points (use SPARINGLY — max 2-3 per talk)
+- "bullets": Text-only fallback (max 2 per talk, only when no visual applies)
 
-Prefer visual layouts. A good conference talk has: 4-5 hero_figure/hero_table, \
+A good conference talk has: 4-5 hero_figure/hero_table, \
 1-2 key_number, 1-2 equation, and only 1-2 bullets slides.
 
 ### Rule 3: Annotations Replace Bullets on Visual Slides
@@ -714,15 +1282,11 @@ them, the slide is just a picture with no explanation.
 
 ## NARRATIVE ARC
 
+This paper has been classified as: **{paper_type_label}**.
+
 Structure your {main_slides} slides following this pattern:
 
-1. Title slide (paper title — exception to assertion rule)
-2. Motivation (1-{budget_motivation} slides): State the problem as an assertion
-3. Method (1-{budget_method} slides): Architecture/approach as assertion claims
-4. Results ({budget_results} slides): Each result as an assertion with evidence
-5. Analysis (1-{budget_analysis} slides): Ablation, visualization, generalization
-6. Conclusion (1 slide): Executive summary of proven claims
-7. Thank you (1 slide)
+{narrative_arc}
 
 Average ~{seconds_per_slide} seconds per slide. Visual target: 60%+ slides \
 with figures, tables, equations, or key numbers.
@@ -967,6 +1531,212 @@ Return JSON as {{"slides": [...]}}. NO markdown. NO explanation. ONLY valid JSON
 """
 
 
+# =============================================================
+# FIGURE–SLIDE RELEVANCE SCORING
+# =============================================================
+
+def _extract_keywords(text: str) -> dict[str, int]:
+    """Extract keyword counts from text, filtering stopwords and short tokens."""
+    words = re.findall(r"[a-z][a-z0-9]{2,}", text.lower())
+    counts: dict[str, int] = {}
+    for w in words:
+        if w not in _STOPWORDS:
+            counts[w] = counts.get(w, 0) + 1
+    return counts
+
+
+def _map_figures_to_sections(paper: dict) -> dict[int, str]:
+    """Map figure numbers to the section that discusses them.
+
+    Scans each section's text for "Figure N" / "Fig. N" references.
+    Returns {figure_number: section_name} for figures with a clear home.
+    """
+    sections = paper.get("sections", [])
+    figures = paper.get("figures", [])
+    mapping: dict[int, str] = {}
+
+    for fig in figures:
+        fig_num = fig.get("figure_number")
+        if not fig_num:
+            continue
+
+        pattern = rf"(?:Figure|Fig\.?)\s*{fig_num}\b"
+        best_section = None
+        best_count = 0
+        for sec in sections:
+            mentions = len(re.findall(pattern, sec.get("text", ""), re.IGNORECASE))
+            if mentions > best_count:
+                best_count = mentions
+                best_section = sec["name"]
+
+        if best_section:
+            mapping[fig_num] = best_section
+
+    return mapping
+
+
+def _score_figure_slide_relevance(
+    fig_caption: str,
+    fig_section: str,
+    slide_title: str,
+    slide_annotations: list[str],
+    slide_source_section: str,
+) -> float:
+    """Score how relevant a figure is to a slide (0.0–1.0).
+
+    Uses keyword overlap between figure context (caption + section name)
+    and slide context (title + annotations + source section).
+    """
+    fig_text = f"{fig_caption} {fig_section}"
+    fig_kw = _extract_keywords(fig_text)
+
+    slide_text = f"{slide_title} {' '.join(slide_annotations)} {slide_source_section}"
+    slide_kw = _extract_keywords(slide_text)
+
+    if not fig_kw or not slide_kw:
+        return 0.0
+
+    shared = set(fig_kw) & set(slide_kw)
+    if not shared:
+        return 0.0
+
+    overlap = sum(min(fig_kw[k], slide_kw[k]) for k in shared)
+    max_possible = min(sum(fig_kw.values()), sum(slide_kw.values()))
+    return overlap / max_possible if max_possible > 0 else 0.0
+
+
+def _validate_figure_assignments(slides: list[dict], paper: dict) -> None:
+    """Validate and fix figure-to-slide assignments based on content relevance.
+
+    Phase 1 — Verify existing assignments: if a slide's assigned figure scores
+    below REASSIGN_THRESHOLD and a much better match exists, swap it.
+
+    Phase 2 — Fill gaps: find slides without figures that strongly match an
+    unused figure, and assign it (switching layout to hero_figure).
+
+    Mutates slides in place.
+    """
+    figures = paper.get("figures", [])
+    if not figures:
+        return
+
+    fig_to_section = _map_figures_to_sections(paper)
+
+    # Build figure info lookup by number
+    fig_info: dict[int, dict] = {}
+    for fig in figures:
+        num = fig.get("figure_number")
+        if num:
+            fig_info[num] = {
+                "caption": fig.get("caption", ""),
+                "section": fig_to_section.get(num, ""),
+                "page": fig.get("page", "?"),
+            }
+
+    if not fig_info:
+        return
+
+    # Score every (figure, slide) pair
+    scores: dict[tuple[int, int], float] = {}
+    eligible_slide_idxs: list[int] = []
+    for i, slide in enumerate(slides):
+        if not isinstance(slide, dict):
+            continue
+        ct = slide.get("content_type", "")
+        if ct in ("title", "thankyou"):
+            continue
+        eligible_slide_idxs.append(i)
+        for fig_num, info in fig_info.items():
+            scores[(fig_num, i)] = _score_figure_slide_relevance(
+                fig_caption=info["caption"],
+                fig_section=info["section"],
+                slide_title=slide.get("title", ""),
+                slide_annotations=slide.get("annotations", []),
+                slide_source_section=slide.get("source_section", ""),
+            )
+
+    # --- Phase 1: validate existing assignments ---
+    REASSIGN_THRESHOLD = 0.05
+    used_figures: set[int] = set()
+
+    for i, slide in enumerate(slides):
+        if not isinstance(slide, dict):
+            continue
+        ref = slide.get("figure_reference")
+        if not ref:
+            continue
+
+        m = re.search(r"Figure\s*(\d+)", str(ref), re.IGNORECASE)
+        if not m:
+            continue
+        fig_num = int(m.group(1))
+        if fig_num not in fig_info:
+            continue
+
+        current_score = scores.get((fig_num, i), 0.0)
+
+        # Find the best-scoring unused figure for this slide
+        best_fig = fig_num
+        best_score = current_score
+        for fn in fig_info:
+            if fn in used_figures:
+                continue
+            s = scores.get((fn, i), 0.0)
+            if s > best_score:
+                best_fig = fn
+                best_score = s
+
+        # Reassign only when current score is weak and the alternative is
+        # meaningfully stronger (at least 2× or +0.10 absolute).
+        if (
+            best_fig != fig_num
+            and current_score < REASSIGN_THRESHOLD
+            and (best_score > current_score * 2 or best_score - current_score > 0.10)
+        ):
+            page = fig_info[best_fig]["page"]
+            old_ref = slide["figure_reference"]
+            slide["figure_reference"] = f"Figure {best_fig} (page {page})"
+            log.info(
+                "Reassigned slide %s: %s → %s (score %.3f → %.3f)",
+                slide.get("slide_number", i), old_ref,
+                slide["figure_reference"], current_score, best_score,
+            )
+            used_figures.add(best_fig)
+        else:
+            used_figures.add(fig_num)
+
+    # --- Phase 2: assign strong-match figures to slides that lack one ---
+    AUTO_ASSIGN_THRESHOLD = 0.15
+    for i in eligible_slide_idxs:
+        slide = slides[i]
+        if slide.get("figure_reference"):
+            continue  # already has a figure
+        layout = slide.get("layout", "")
+        if layout in ("hero_table", "key_number"):
+            continue  # table/number layouts don't take a hero figure
+
+        best_fig = None
+        best_score = AUTO_ASSIGN_THRESHOLD
+        for fn in fig_info:
+            if fn in used_figures:
+                continue
+            s = scores.get((fn, i), 0.0)
+            if s > best_score:
+                best_fig = fn
+                best_score = s
+
+        if best_fig is not None:
+            page = fig_info[best_fig]["page"]
+            slide["figure_reference"] = f"Figure {best_fig} (page {page})"
+            if layout == "bullets":
+                slide["layout"] = "hero_figure"
+            log.info(
+                "Auto-assigned Figure %d to slide %s (score %.3f)",
+                best_fig, slide.get("slide_number", i), best_score,
+            )
+            used_figures.add(best_fig)
+
+
 MAX_SUMMARY_CHARS = 15_000  # ~3.7K tokens — keeps API calls fast and reliable
 
 
@@ -993,19 +1763,27 @@ def _build_paper_summary(paper: dict) -> str:
 
     figures = paper.get("figures", [])
     if figures:
+        fig_section_map = _map_figures_to_sections(paper)
         parts.append(f"\nAVAILABLE FIGURES ({len(figures)} total):")
         parts.append(
             "IMPORTANT: Use these figures in main slides. Do NOT default to "
             "tables when a relevant figure exists. Alternate table/figure "
-            "layouts for visual variety."
+            "layouts for visual variety.\n"
+            "Each figure lists the section that discusses it — assign the "
+            "figure to a slide covering THAT section's topic."
         )
         for i, fig in enumerate(figures):
             caption = fig.get("caption") or "(no caption detected)"
             page = fig.get("page", "?")
             fig_num = fig.get("figure_number") or fig.get("figure_label") or (i + 1)
+            section_hint = fig_section_map.get(
+                fig.get("figure_number"), ""
+            )
+            section_line = f"  Discussed in: {section_hint}" if section_hint else ""
             parts.append(
                 f"  - Figure {fig_num} (page {page}): {caption}\n"
                 f"    → ONLY use on slides whose content matches this caption"
+                f"{section_line}"
             )
 
     summary = "\n".join(parts)
@@ -1175,6 +1953,71 @@ def _validate_layout_variety(slides: list[dict]) -> None:
         )
 
 
+def _enforce_layout_hierarchy(slides: list[dict]) -> None:
+    """Fix slides whose layout contradicts their own data.
+
+    Applies the same decision hierarchy from the prompt as a hard
+    post-processing pass so violations are corrected even when Claude
+    ignores the rules.
+
+    Mutates slides in place.
+    """
+    for s in slides:
+        if not isinstance(s, dict):
+            continue
+        ct = s.get("content_type", "")
+        if ct in ("title", "thankyou"):
+            continue
+
+        layout = s.get("layout", "bullets")
+        has_figure = bool(s.get("figure_reference"))
+        has_table = bool(s.get("table_data"))
+        has_key_num = bool(s.get("key_number"))
+        has_equation = bool(s.get("equation_latex"))
+
+        # Count data rows to verify a real table
+        table_rows = 0
+        if has_table:
+            td = s["table_data"]
+            if isinstance(td, dict):
+                table_rows = len(td.get("rows", []))
+
+        new_layout = layout
+
+        # Rule: figure_reference present → must be hero_figure
+        if has_figure and layout != "hero_figure":
+            # Don't override equation slides that use a side figure
+            if layout != "equation":
+                new_layout = "hero_figure"
+
+        # Rule: table_data with 3+ rows → must be hero_table
+        elif has_table and table_rows >= 3 and layout not in ("hero_table",):
+            new_layout = "hero_table"
+
+        # Rule: key_number present → must be key_number
+        elif has_key_num and layout != "key_number":
+            new_layout = "key_number"
+
+        # Rule: equation_latex present → must be equation
+        elif has_equation and layout != "equation":
+            # Don't override hero_figure that also has an equation sidebar
+            if not has_figure:
+                new_layout = "equation"
+
+        if new_layout != layout:
+            log.info(
+                "Layout fix slide %s: %s → %s (has figure=%s, table=%d rows, "
+                "key_num=%s, equation=%s)",
+                s.get("slide_number", "?"), layout, new_layout,
+                has_figure, table_rows, has_key_num, has_equation,
+            )
+            s["layout"] = new_layout
+
+            # Migrate bullet_points → annotations for visual layouts
+            if new_layout != "bullets" and s.get("bullet_points") and not s.get("annotations"):
+                s["annotations"] = s.pop("bullet_points")
+
+
 def _call_claude(
     client: anthropic.Anthropic, system: str, user: str, max_tokens: int = 4096,
     model: str | None = None,
@@ -1289,11 +2132,27 @@ def plan_slides(
     client = anthropic.Anthropic(api_key=api_key, timeout=300.0, max_retries=1)
     paper_summary = _build_paper_summary(paper)
 
-    # --- Dynamic slide count ---
+    # --- Classify paper type and compute slide budget ---
     slide_counts = _calculate_slide_count(config["minutes"], paper)
-    budget = _allocate_slide_budget(slide_counts["main_slides"], paper)
+    paper_class = classify_paper_type(paper)
+    paper_type = paper_class["type"]
 
-    # Build experiment guidance — always provide experiment names
+    # Select the right budget allocator for this paper type
+    main_n = slide_counts["main_slides"]
+    if paper_type == "survey":
+        budget = _allocate_budget_survey(main_n)
+    elif paper_type == "theory":
+        budget = _allocate_budget_theory(main_n)
+    elif paper_type == "position":
+        budget = _allocate_budget_position(main_n)
+    else:  # empirical (default)
+        budget = _allocate_slide_budget(main_n, paper)
+
+    # Build the narrative arc text for the prompt
+    narrative_arc = _build_narrative_arc(paper_type, budget)
+
+    # Build experiment guidance — relevant for empirical papers,
+    # simplified for other types
     sections = paper.get("sections", [])
     results_keywords = {"experiment", "case study", "evaluation", "result",
                         "analysis", "ablation", "study", "finding",
@@ -1303,61 +2162,85 @@ def plan_slides(
                                   for kw in results_keywords)]
 
     n_experiments = slide_counts["n_experiments"]
-    n_results = budget["results"]
+    n_results = budget.get("results", 0)
 
-    if result_section_names:
+    if paper_type != "empirical":
         experiment_guidance = (
-            f"Identified experiment/result sections in this paper: "
-            f"{result_section_names}.\n"
+            f"This is a {PAPER_TYPES[paper_type]['label']}. "
+            f"Follow the narrative arc above rather than the experiment-centric "
+            f"rules. Adapt content_type values to match the arc sections."
         )
+        backup_expectation = "use backup slides for supplementary material"
     else:
-        experiment_guidance = (
-            f"This paper has ~{n_experiments} distinct experiments/findings "
-            f"embedded across its sections. Identify them from the text.\n"
-        )
-
-    if n_results >= n_experiments:
-        experiment_guidance += (
-            f"You have {n_results} result slides for {n_experiments} experiments. "
-            f"Every experiment gets its own slide. Use surplus slides "
-            f"({n_results - n_experiments}) for deeper dives into the most "
-            f"important experiments."
-        )
-    else:
-        experiment_guidance += (
-            f"You have {n_results} result slides for {n_experiments} experiments. "
-            f"Group the least critical into shared slides (max 2-3 per slide). "
-            f"Every experiment must appear on at least one main slide — "
-            f"never drop one entirely."
-        )
-
-    # Backup expectation for the prompt
-    if n_results >= n_experiments:
-        backup_expectation = "zero experiments should need backup slides"
-    else:
-        n_ungroupable = max(0, n_experiments - n_results * 2)
-        if n_ungroupable > 0:
-            backup_expectation = (
-                f"try to fit all via grouping, but up to {n_ungroupable} "
-                f"may need backup slides"
+        if result_section_names:
+            experiment_guidance = (
+                f"Identified experiment/result sections in this paper: "
+                f"{result_section_names}.\n"
             )
         else:
-            backup_expectation = (
-                "all experiments should fit via grouping — zero need backup"
+            experiment_guidance = (
+                f"This paper has ~{n_experiments} distinct experiments/findings "
+                f"embedded across its sections. Identify them from the text.\n"
             )
+
+        if n_results >= n_experiments:
+            experiment_guidance += (
+                f"You have {n_results} result slides for {n_experiments} experiments. "
+                f"Every experiment gets its own slide. Use surplus slides "
+                f"({n_results - n_experiments}) for deeper dives into the most "
+                f"important experiments."
+            )
+        else:
+            experiment_guidance += (
+                f"You have {n_results} result slides for {n_experiments} experiments. "
+                f"Group the least critical into shared slides (max 2-3 per slide). "
+                f"Every experiment must appear on at least one main slide — "
+                f"never drop one entirely."
+            )
+
+        # Backup expectation for the prompt
+        if n_results >= n_experiments:
+            backup_expectation = "zero experiments should need backup slides"
+        else:
+            n_ungroupable = max(0, n_experiments - n_results * 2)
+            if n_ungroupable > 0:
+                backup_expectation = (
+                    f"try to fit all via grouping, but up to {n_ungroupable} "
+                    f"may need backup slides"
+                )
+            else:
+                backup_expectation = (
+                    "all experiments should fit via grouping — zero need backup"
+                )
 
     timing_budget = int(config["minutes"] * 60 * 0.80)
     seconds_per_slide = int(timing_budget / max(slide_counts["main_slides"], 1))
+
+    # Provide all budget_* keys for the prompt format call.
+    # Keys not relevant to this paper type default to 0.
+    budget_for_prompt = {
+        "motivation": budget.get("motivation", 0),
+        "method": budget.get("method", 0),
+        "results": budget.get("results", 0),
+        "analysis": budget.get("analysis", 0),
+        "taxonomy": budget.get("taxonomy", 0),
+        "comparison": budget.get("comparison", 0),
+        "gaps": budget.get("gaps", 0),
+        "formulation": budget.get("formulation", 0),
+        "proof": budget.get("proof", 0),
+        "implications": budget.get("implications", 0),
+        "argument": budget.get("argument", 0),
+    }
 
     # --- CALL 1: Plan outline + tables ---
     plan_system = SYSTEM_PROMPT_PLAN.format(
         talk_length=config["minutes"],
         talk_format=config["format"],
         main_slides=slide_counts["main_slides"],
-        budget_motivation=budget["motivation"],
-        budget_method=budget["method"],
-        budget_results=budget["results"],
-        budget_analysis=budget["analysis"],
+        budget_motivation=budget_for_prompt["motivation"],
+        budget_method=budget_for_prompt["method"],
+        budget_results=budget_for_prompt["results"],
+        budget_analysis=budget_for_prompt["analysis"],
         n_sections=len(sections),
         n_figures=paper.get("num_figures", len(paper.get("figures", []))),
         n_pages=paper.get("num_pages", 0),
@@ -1367,6 +2250,8 @@ def plan_slides(
         backup_expectation=backup_expectation,
         timing_budget=timing_budget,
         seconds_per_slide=seconds_per_slide,
+        paper_type_label=PAPER_TYPES[paper_type]["label"],
+        narrative_arc=narrative_arc,
     )
 
     # Scale max_tokens for larger slide counts (~400 tokens per slide)
@@ -1502,6 +2387,8 @@ def plan_slides(
     all_slides = slides + backup_slides
     _enforce_timing_budget(all_slides, config["minutes"])
     _enforce_highlight_terms(all_slides, paper)
+    _enforce_layout_hierarchy(all_slides)
+    _validate_figure_assignments(slides, paper)
     _validate_layout_variety(slides)
 
     # --- Validate coverage checklist ---
@@ -1530,6 +2417,7 @@ def plan_slides(
         "backup_slides": backup_slides,
         "visual_checklist": plan_data.get("visual_checklist", {}),
         "coverage_checklist": coverage,
+        "paper_type": paper_class,
         "slide_budget": {
             "target_main": slide_counts["main_slides"],
             "target_backup": slide_counts["backup_slides"],
