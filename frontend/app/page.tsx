@@ -144,8 +144,11 @@ export default function Home() {
             <span className="text-accent"> — in 60 seconds</span>
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg text-gray-500">
-            Assertion-evidence format. Figures extracted. Speaker notes included.
+            Assertion-evidence format. Speaker notes included.
             No signup needed.
+          </p>
+          <p className="mx-auto mt-4 max-w-xl rounded-lg bg-accent/5 px-4 py-2.5 text-sm font-medium text-accent sm:text-base">
+            Figures extracted directly from your PDF. No copy-paste.
           </p>
         </div>
 
@@ -359,14 +362,36 @@ export default function Home() {
           <h2 className="text-center text-sm font-semibold uppercase tracking-wide text-gray-400">
             What you get
           </h2>
-          <div className="mt-8 grid gap-6 sm:grid-cols-2">
+          {/* Hero feature — Figure extraction */}
+          <div className="mt-8 rounded-xl border-2 border-accent/30 bg-accent/[0.03] p-5 sm:p-6">
+            <div className="flex items-start gap-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-semibold text-foreground sm:text-base">Your Figures, Properly Placed</h3>
+                  <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
+                    Unique to SlideScholar
+                  </span>
+                </div>
+                <p className="mt-1.5 text-sm text-gray-500">
+                  We pull every chart, diagram, and image from your paper and place them on the right slide
+                  — with captions, correct aspect ratios, and no manual work.
+                </p>
+                <p className="mt-2 text-xs font-medium text-gray-400 italic">
+                  Researchers say this alone saves 30+ minutes per talk.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-6 sm:grid-cols-3">
             <FeatureCard
               title="Assertion-Evidence Titles"
               desc="Every slide makes a claim, not a topic label. The format top researchers use."
-            />
-            <FeatureCard
-              title="Your Figures, Properly Placed"
-              desc="Extracted from your PDF with correct aspect ratios and captions."
             />
             <FeatureCard
               title="Editable Tables"
@@ -420,7 +445,7 @@ export default function Home() {
               </thead>
               <tbody className="text-gray-600">
                 <CompareRow feature="Paper structure awareness" ss gamma slides chatgpt={false} />
-                <CompareRow feature="Figure extraction" ss chatgpt={false} gamma={false} slides={false} />
+                <CompareRow feature="Figure extraction" ss chatgpt={false} gamma={false} slides={false} highlight note="Only tool that does this" />
                 <CompareRow feature="Editable tables" ss chatgpt={false} gamma={false} slides={false} />
                 <CompareRow feature="Speaker notes" ss chatgpt gamma={false} slides={false} />
                 <CompareRow feature="Talk length adaptation" ss chatgpt={false} gamma={false} slides={false} />
@@ -499,18 +524,25 @@ function CompareRow({
   chatgpt = false,
   gamma = false,
   slides = false,
+  highlight = false,
+  note,
 }: {
   feature: string;
   ss?: boolean;
   chatgpt?: boolean;
   gamma?: boolean;
   slides?: boolean;
+  highlight?: boolean;
+  note?: string;
 }) {
   const yes = <span className="text-green-600">&#10003;</span>;
   const no = <span className="text-gray-300">&#10005;</span>;
   return (
-    <tr className="border-b border-gray-100">
-      <td className="py-2.5 pr-4 font-medium">{feature}</td>
+    <tr className={highlight ? "border-b border-accent/20 bg-accent/[0.04]" : "border-b border-gray-100"}>
+      <td className={`py-2.5 pr-4 ${highlight ? "font-semibold text-accent" : "font-medium"}`}>
+        {feature}
+        {note && <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-accent/70">{note}</span>}
+      </td>
       <td className="px-4 py-2.5 text-center">{ss ? yes : no}</td>
       <td className="px-4 py-2.5 text-center">{chatgpt ? yes : no}</td>
       <td className="px-4 py-2.5 text-center">{gamma ? yes : no}</td>

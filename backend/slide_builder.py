@@ -13,7 +13,7 @@ from PIL import Image as PILImage
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.enum.shapes import MSO_SHAPE
 
 log = logging.getLogger("slidescholar")
@@ -223,12 +223,13 @@ def _add_title_text(slide, title, left=None, top=None, width=None, size=None, al
     width = width if width is not None else (SLIDE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT)
     size = size or TITLE_SIZE
 
-    # Taller box for assertion-evidence sentence titles (2-line wrap)
-    height = Inches(1.0) if size <= Pt(28) else Inches(0.7)
+    # Taller box for assertion-evidence sentence titles (2–3 line wrap)
+    height = Inches(1.1) if size <= Pt(28) else Inches(1.0)
 
     txBox = slide.shapes.add_textbox(left, top, width, height)
     tf = txBox.text_frame
     tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     p = tf.paragraphs[0]
     p.alignment = alignment or PP_ALIGN.LEFT
     run = p.add_run()
@@ -252,10 +253,11 @@ def _truncate(text, max_chars=MAX_BULLET_CHARS):
 def _add_bullets(slide, bullets, left, top, width, height=None):
     """Add a list of bullet points as a textbox."""
     height = height or Inches(4.5)
+    bullets = bullets[:7]  # cap at 7 bullets to prevent overflow
     txBox = slide.shapes.add_textbox(left, top, width, height)
     tf = txBox.text_frame
     tf.word_wrap = True
-    tf.auto_size = None
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
     for i, bullet in enumerate(bullets):
         if not isinstance(bullet, str):
@@ -285,7 +287,7 @@ def _add_annotations(slide, annotations, left, top, width, height=None):
     txBox = slide.shapes.add_textbox(int(left), int(top), int(width), int(height))
     tf = txBox.text_frame
     tf.word_wrap = True
-    tf.auto_size = None
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
 
     for i, ann in enumerate(annotations[:4]):  # max 4 annotations
         if not isinstance(ann, str):
@@ -729,12 +731,15 @@ def add_title_slide(prs, slide_data, paper_meta=None):
     _add_accent_bar(slide)
 
     paper_meta = paper_meta or {}
+    cursor = VerticalCursor(start=Inches(1.8))
 
     # Title — large, centered (rendered ONCE only)
     title_text = slide_data.get("title", paper_meta.get("talk_title", ""))
+    title_h = Inches(1.0)
+    title_top = cursor.place(title_h, gap=Inches(0.15))
     _add_title_text(
         slide, title_text,
-        left=Inches(1.5), top=Inches(1.8),
+        left=Inches(1.5), top=title_top,
         width=SLIDE_WIDTH - Inches(3.0),
         size=Pt(36), alignment=PP_ALIGN.CENTER,
     )
@@ -742,12 +747,15 @@ def add_title_slide(prs, slide_data, paper_meta=None):
     # Subtitle / hook (must differ from title)
     subtitle = paper_meta.get("talk_subtitle", "")
     if subtitle and subtitle.lower().strip() != title_text.lower().strip():
+        sub_h = Inches(0.5)
+        sub_top = cursor.place(sub_h, gap=Inches(0.15))
         txBox = slide.shapes.add_textbox(
-            Inches(2.0), Inches(2.9),
-            SLIDE_WIDTH - Inches(4.0), Inches(0.5),
+            Inches(2.0), sub_top,
+            SLIDE_WIDTH - Inches(4.0), sub_h,
         )
         tf = txBox.text_frame
         tf.word_wrap = True
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
         p = tf.paragraphs[0]
         p.alignment = PP_ALIGN.CENTER
         run = p.add_run()
@@ -760,12 +768,15 @@ def add_title_slide(prs, slide_data, paper_meta=None):
     # Authors
     authors = paper_meta.get("authors", "")
     if authors and authors != "Unknown":
+        auth_h = Inches(0.5)
+        auth_top = cursor.place(auth_h, gap=Inches(0.15))
         txBox = slide.shapes.add_textbox(
-            Inches(1.5), Inches(3.7),
-            SLIDE_WIDTH - Inches(3.0), Inches(0.5),
+            Inches(1.5), auth_top,
+            SLIDE_WIDTH - Inches(3.0), auth_h,
         )
         tf = txBox.text_frame
         tf.word_wrap = True
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
         p = tf.paragraphs[0]
         p.alignment = PP_ALIGN.CENTER
         run = p.add_run()
@@ -777,12 +788,15 @@ def add_title_slide(prs, slide_data, paper_meta=None):
     # Venue
     venue = paper_meta.get("venue", "")
     if venue:
+        ven_h = Inches(0.4)
+        ven_top = cursor.place(ven_h)
         txBox = slide.shapes.add_textbox(
-            Inches(2.0), Inches(4.4),
-            SLIDE_WIDTH - Inches(4.0), Inches(0.4),
+            Inches(2.0), ven_top,
+            SLIDE_WIDTH - Inches(4.0), ven_h,
         )
         tf = txBox.text_frame
         tf.word_wrap = True
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
         p = tf.paragraphs[0]
         p.alignment = PP_ALIGN.CENTER
         run = p.add_run()
@@ -1126,15 +1140,20 @@ def add_key_number_slide(prs, slide_data, figures=None):
 
     _add_title_text(slide, slide_data.get("title", ""))
 
+    cursor = VerticalCursor(start=Inches(2.0))
+
     # Large key number — centered and prominent
     key_num = slide_data.get("key_number", "")
     if key_num:
+        num_h = Inches(2.0)
+        num_top = cursor.place(num_h, gap=Inches(0.15))
         txBox = slide.shapes.add_textbox(
-            Inches(2.0), Inches(2.2),
-            SLIDE_WIDTH - Inches(4.0), Inches(2.0),
+            Inches(2.0), num_top,
+            SLIDE_WIDTH - Inches(4.0), num_h,
         )
         tf = txBox.text_frame
         tf.word_wrap = True
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
         p = tf.paragraphs[0]
         p.alignment = PP_ALIGN.CENTER
         run = p.add_run()
@@ -1147,12 +1166,15 @@ def add_key_number_slide(prs, slide_data, figures=None):
     # Context below the number
     context = slide_data.get("key_number_context", "")
     if context:
+        ctx_h = Inches(0.6)
+        ctx_top = cursor.place(ctx_h, gap=Inches(0.2))
         txBox = slide.shapes.add_textbox(
-            Inches(2.0), Inches(4.3),
-            SLIDE_WIDTH - Inches(4.0), Inches(0.6),
+            Inches(2.0), ctx_top,
+            SLIDE_WIDTH - Inches(4.0), ctx_h,
         )
         tf = txBox.text_frame
         tf.word_wrap = True
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
         p = tf.paragraphs[0]
         p.alignment = PP_ALIGN.CENTER
         run = p.add_run()
@@ -1161,13 +1183,17 @@ def add_key_number_slide(prs, slide_data, figures=None):
         run.font.size = KEY_NUMBER_CONTEXT_SIZE
         run.font.color.rgb = COLOR_BODY
 
-    # Annotations below context
+    # Annotations below context — use remaining space
     annotations = slide_data.get("annotations", [])
     if annotations:
-        _add_annotations(
-            slide, annotations, Inches(2.5), Inches(5.2),
-            SLIDE_WIDTH - Inches(5.0), Inches(1.5),
-        )
+        cursor.advance(Inches(0.15))
+        ann_h = min(cursor.remaining(int(MAX_CONTENT_BOTTOM)), Inches(1.5))
+        if ann_h > Inches(0.4):
+            ann_top = cursor.place(ann_h)
+            _add_annotations(
+                slide, annotations, Inches(2.5), ann_top,
+                SLIDE_WIDTH - Inches(5.0), ann_h,
+            )
 
     _add_references(slide, slide_data.get("references"))
     _add_slide_number(slide, slide_data.get("slide_number", ""))
@@ -1230,19 +1256,25 @@ def add_equation_slide(prs, slide_data, figures=None):
             _add_equation(slide, equation, eq_left, eq_top, int(eq_width))
 
         if annotations:
-            ann_top = cursor.place(Inches(2.5))
-            _add_annotations(
-                slide, annotations, Inches(2.0), ann_top,
-                SLIDE_WIDTH - Inches(4.0), Inches(2.5),
-            )
+            ann_remaining = min(cursor.remaining(int(MAX_CONTENT_BOTTOM)), Inches(2.5))
+            if ann_remaining > Inches(0.5):
+                ann_top = cursor.place(ann_remaining)
+                _add_annotations(
+                    slide, annotations, Inches(2.0), ann_top,
+                    SLIDE_WIDTH - Inches(4.0), ann_remaining,
+                )
 
-    # Context line if provided
+    # Context line if provided — placed via cursor (shared across both branches)
     context = slide_data.get("context_line")
     if context:
-        _add_context_line(
-            slide, context, Inches(2.0), Inches(6.2),
-            SLIDE_WIDTH - Inches(4.0),
-        )
+        # For the two-column branch, cursor tracks left-side elements;
+        # for centered branch, cursor tracks equation + annotations.
+        ctx_top = max(cursor.y, int(Inches(5.8)))
+        if ctx_top + Inches(0.35) <= int(MAX_CONTENT_BOTTOM):
+            _add_context_line(
+                slide, context, Inches(2.0), ctx_top,
+                SLIDE_WIDTH - Inches(4.0),
+            )
 
     _add_references(slide, slide_data.get("references"))
     _add_slide_number(slide, slide_data.get("slide_number", ""))
@@ -1275,6 +1307,7 @@ def add_thankyou_slide(prs, slide_data):
     )
     tf = txBox.text_frame
     tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     for i, bullet in enumerate(bullets):
         p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         p.alignment = PP_ALIGN.CENTER
