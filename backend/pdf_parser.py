@@ -204,6 +204,135 @@ def _find_figure_captions_on_page(page_text: str) -> list[dict]:
 
 
 # ------------------------------------------------------------------
+# Caption-anchored figure bounding-box detection
+# ------------------------------------------------------------------
+
+
+def _find_caption_rect(page: fitz.Page, figure_num: int) -> fitz.Rect | None:
+    """Find the bounding box of a 'Figure N' caption on *page*.
+
+    Searches text blocks for the pattern ``Figure N`` / ``Fig. N`` and
+    returns the bounding rectangle of the containing block.
+    """
+    blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
+    pattern = re.compile(rf"(?:Figure|Fig\.?)\s*{figure_num}\b", re.IGNORECASE)
+
+    for block in blocks:
+        if block["type"] != 0:
+            continue
+        for line in block.get("lines", []):
+            line_text = "".join(span["text"] for span in line["spans"])
+            if pattern.search(line_text):
+                return fitz.Rect(block["bbox"])
+    return None
+
+
+def _estimate_figure_bbox(
+    page: fitz.Page, caption_rect: fitz.Rect,
+) -> fitz.Rect:
+    """Estimate the figure bounding box given its caption location.
+
+    In academic papers, figures sit *above* their captions.  This function:
+      1. Determines the column (left / right / full-width) from the caption.
+      2. Looks for image blocks (type=1) directly above the caption.
+      3. Falls back to the gap between the preceding text block and the
+         caption — that's where the figure lives.
+    """
+    page_rect = page.rect
+    blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
+
+    # Column detection
+    page_mid = page_rect.width / 2
+    cap_width = caption_rect.x1 - caption_rect.x0
+    cap_mid = (caption_rect.x0 + caption_rect.x1) / 2
+
+    if cap_width > page_rect.width * 0.6:
+        col_x0, col_x1 = page_rect.x0, page_rect.x1
+    elif cap_mid < page_mid:
+        col_x0, col_x1 = page_rect.x0, page_mid + 10
+    else:
+        col_x0, col_x1 = page_mid - 10, page_rect.x1
+
+    # Strategy A: find image blocks (type=1) above the caption
+    best_img = None
+    for block in blocks:
+        if block["type"] != 1:
+            continue
+        bbox = fitz.Rect(block["bbox"])
+        if bbox.y1 > caption_rect.y0 + 10:
+            continue
+        if bbox.x1 < col_x0 or bbox.x0 > col_x1:
+            continue
+        if best_img is None or bbox.y1 > best_img.y1:
+            best_img = bbox
+
+    if best_img is not None:
+        return fitz.Rect(
+            max(best_img.x0 - 5, page_rect.x0),
+            max(best_img.y0 - 5, page_rect.y0),
+            min(best_img.x1 + 5, page_rect.x1),
+            min(best_img.y1 + 5, caption_rect.y0),
+        )
+
+    # Strategy B: no image block found — the figure is likely vector
+    # content (drawings, positioned text like attention heatmaps, etc.).
+    # Find the nearest section header or large vertical gap above the
+    # caption to determine where the figure area starts.
+    above_blocks: list[tuple[float, float]] = []  # (y0, y1) of text blocks above caption
+    for block in blocks:
+        if block["type"] != 0:
+            continue
+        bbox = fitz.Rect(block["bbox"])
+        if bbox.y1 < caption_rect.y0 - 5 and bbox.x1 >= col_x0 and bbox.x0 <= col_x1:
+            above_blocks.append((bbox.y0, bbox.y1))
+
+    if above_blocks:
+        above_blocks.sort(key=lambda b: b[0])
+
+        # Look for the largest vertical gap between consecutive blocks.
+        # The figure content starts just below the gap (after the header/
+        # preceding paragraph).
+        best_gap_bottom = above_blocks[0][0]  # default: top of first block
+        best_gap_size = 0
+        for i in range(1, len(above_blocks)):
+            gap = above_blocks[i][0] - above_blocks[i - 1][1]
+            if gap > best_gap_size:
+                best_gap_size = gap
+                best_gap_bottom = above_blocks[i - 1][1]
+
+        # If the largest gap is small (<20pt), all these blocks are likely
+        # the figure content itself (e.g., attention heatmap words).
+        # In that case, start from the top of the first block.
+        if best_gap_size >= 20:
+            fig_top = best_gap_bottom + 3
+        else:
+            fig_top = above_blocks[0][0] - 5
+
+        # Safety: ensure at least 150pt tall (≈2 inches) to avoid tiny crops
+        min_height = 150
+        if caption_rect.y0 - fig_top < min_height:
+            fig_top = max(page_rect.y0, caption_rect.y0 - min_height)
+    else:
+        fig_top = max(page_rect.y0, caption_rect.y0 - 300)
+
+    return fitz.Rect(col_x0, max(fig_top, page_rect.y0), col_x1, caption_rect.y0 - 2)
+
+
+def _is_fullpage_image(page: fitz.Page, xref: int) -> bool:
+    """Return True if the raster image at *xref* covers >80 % of *page*."""
+    try:
+        rects = page.get_image_rects(xref)
+        if not rects:
+            return False
+        img_rect = rects[0]
+        page_area = page.rect.width * page.rect.height
+        img_area = img_rect.width * img_rect.height
+        return page_area > 0 and img_area > page_area * 0.80
+    except Exception:
+        return False
+
+
+# ------------------------------------------------------------------
 # Strategy 1  — raster extraction (PNG / JPEG embedded images)
 # ------------------------------------------------------------------
 
@@ -260,6 +389,16 @@ def _extract_raster_figures(
             width = base_image.get("width", 0)
             height = base_image.get("height", 0)
             if width < 100 or height < 100:
+                continue
+
+            # Skip full-page images (scanned pages, background images).
+            # These will be re-extracted with tight cropping in Strategy 2.
+            if _is_fullpage_image(page, xref):
+                log.info(
+                    "Skipping full-page raster on page %d (xref=%d, %dx%d) "
+                    "— will re-extract with tight crop",
+                    page_num + 1, xref, width, height,
+                )
                 continue
 
             ext = base_image.get("ext", "png")
@@ -321,30 +460,81 @@ def _extract_raster_figures(
 # ------------------------------------------------------------------
 
 _PAGE_RENDER_DPI = 200
-_CROP_RATIO = 0.80  # keep top 80% of the page (figure area)
 
 
-def _render_page_figure(
+def _render_figure_crop(
     doc: fitz.Document,
-    page_num: int,         # 0-indexed
-    figure_number: int,
+    page_num: int,
+    figure_num: int,
     caption: str,
     temp_dir: str,
 ) -> dict | None:
-    """Render a page to PNG and crop to the figure area."""
+    """Render a tightly-cropped figure region from *page_num*.
+
+    1. Locate the ``Figure N`` caption on the page.
+    2. Estimate the figure bounding box above the caption.
+    3. Render only that region at high DPI.
+    4. If the crop still covers >80 % of the page, shrink to the
+       caption-anchored estimate and retry.
+    """
     try:
         page = doc[page_num]
+        page_rect = page.rect
+        page_area = page_rect.width * page_rect.height
 
-        # Crop to top portion using clip (figure area, excluding footer)
-        r = page.rect
-        crop_rect = fitz.Rect(r.x0, r.y0, r.x1, r.y0 + r.height * _CROP_RATIO)
-        pix = page.get_pixmap(dpi=_PAGE_RENDER_DPI, clip=crop_rect)
+        # Step 1: find caption location
+        cap_rect = _find_caption_rect(page, figure_num)
 
-        # Convert CMYK if needed
+        if cap_rect:
+            # Step 2: estimate figure bbox from caption anchor
+            fig_bbox = _estimate_figure_bbox(page, cap_rect)
+        else:
+            # No caption found — fall back to the top 60 % of the page
+            # (tighter than the old 80 % default)
+            fig_bbox = fitz.Rect(
+                page_rect.x0, page_rect.y0,
+                page_rect.x1, page_rect.y0 + page_rect.height * 0.60,
+            )
+
+        # Sanity: ensure the crop region has a reasonable size
+        fig_area = fig_bbox.width * fig_bbox.height
+        min_area = page_area * 0.02   # at least 2 % of page
+        if fig_area < min_area:
+            # Too tiny — widen to column width, add vertical padding
+            fig_bbox = fitz.Rect(
+                fig_bbox.x0,
+                max(page_rect.y0, fig_bbox.y0 - 50),
+                fig_bbox.x1,
+                min(fig_bbox.y1 + 50, page_rect.y1),
+            )
+
+        # Step 3: render the crop
+        pix = page.get_pixmap(dpi=_PAGE_RENDER_DPI, clip=fig_bbox)
         if pix.n - pix.alpha > 3:
             pix = fitz.Pixmap(fitz.csRGB, pix)
 
-        filename = f"fig_p{page_num}_v{figure_number}.png"
+        # Step 4: fullpage safety check — if still >80 % of page, tighten
+        crop_area = fig_bbox.width * fig_bbox.height
+        if page_area > 0 and crop_area > page_area * 0.80 and cap_rect:
+            # Retry with a smaller region: 250 pt above caption, full column width
+            tight = fitz.Rect(
+                fig_bbox.x0,
+                max(page_rect.y0, cap_rect.y0 - 250),
+                fig_bbox.x1,
+                cap_rect.y0 - 2,
+            )
+            if tight.width > 50 and tight.height > 50:
+                pix = page.get_pixmap(dpi=_PAGE_RENDER_DPI, clip=tight)
+                if pix.n - pix.alpha > 3:
+                    pix = fitz.Pixmap(fitz.csRGB, pix)
+                log.info(
+                    "Figure %d (page %d): initial crop was %.0f%% of page, "
+                    "retried with tight crop (%.0f×%.0f pt)",
+                    figure_num, page_num + 1,
+                    crop_area / page_area * 100, tight.width, tight.height,
+                )
+
+        filename = f"fig_p{page_num}_v{figure_num}.png"
         filepath = os.path.join(temp_dir, filename)
         pix.save(filepath)
 
@@ -352,16 +542,18 @@ def _render_page_figure(
             "path": filepath,
             "filename": filename,
             "page": page_num + 1,
-            "figure_number": figure_number,
-            "figure_label": f"Figure {figure_number}",
+            "figure_number": figure_num,
+            "figure_label": f"Figure {figure_num}",
             "caption": _clean_caption(caption),
             "source": "page_render",
             "width": pix.width,
             "height": pix.height,
         }
     except Exception as exc:
-        log.warning("Page-render failed for Figure %d (page %d): %s",
-                     figure_number, page_num + 1, exc)
+        log.warning(
+            "Tight-crop render failed for Figure %d (page %d): %s",
+            figure_num, page_num + 1, exc,
+        )
         return None
 
 
@@ -371,37 +563,14 @@ def _extract_rendered_figures(
     pages_text: list[str],
     raster_figures: list[dict],
 ) -> list[dict]:
-    """Find figure captions on pages that have NO raster image and render
-    those pages as PNG screenshots (vector-graphic fallback)."""
+    """Extract figures not covered by raster extraction using caption-anchored
+    tight crops (vector-graphic fallback and fullpage-raster re-extraction)."""
 
-    # Figure numbers already covered by raster extraction
     covered_nums = {f["figure_number"] for f in raster_figures if f.get("figure_number")}
-    # Pages that already have a raster figure
-    covered_pages = {f["page"] for f in raster_figures}
 
     rendered: list[dict] = []
 
-    # Cache: page_num -> pixmap, so we render each page at most once
-    _pixmap_cache: dict[int, fitz.Pixmap] = {}
-
-    def _get_page_pixmap(page_num: int) -> fitz.Pixmap | None:
-        if page_num in _pixmap_cache:
-            return _pixmap_cache[page_num]
-        try:
-            page = doc[page_num]
-            r = page.rect
-            crop_rect = fitz.Rect(r.x0, r.y0, r.x1, r.y0 + r.height * _CROP_RATIO)
-            pix = page.get_pixmap(dpi=_PAGE_RENDER_DPI, clip=crop_rect)
-            if pix.n - pix.alpha > 3:
-                pix = fitz.Pixmap(fitz.csRGB, pix)
-            _pixmap_cache[page_num] = pix
-            return pix
-        except Exception as exc:
-            log.warning("Page render failed for page %d: %s", page_num + 1, exc)
-            return None
-
     for page_num, text in enumerate(pages_text):
-        page_1idx = page_num + 1
         captions = _find_figure_captions_on_page(text)
         if not captions:
             continue
@@ -410,32 +579,17 @@ def _extract_rendered_figures(
             fig_num = cap["number"]
             if fig_num in covered_nums:
                 continue
-            if page_1idx in covered_pages:
-                continue
 
-            pix = _get_page_pixmap(page_num)
-            if not pix:
-                continue
-
-            try:
-                filename = f"fig_p{page_num}_v{fig_num}.png"
-                filepath = os.path.join(temp_dir, filename)
-                pix.save(filepath)
-                rendered.append({
-                    "path": filepath,
-                    "filename": filename,
-                    "page": page_1idx,
-                    "figure_number": fig_num,
-                    "figure_label": f"Figure {fig_num}",
-                    "caption": _clean_caption(cap["caption"]),
-                    "source": "page_render",
-                    "width": pix.width,
-                    "height": pix.height,
-                })
+            result = _render_figure_crop(
+                doc, page_num, fig_num, cap["caption"], temp_dir,
+            )
+            if result:
+                rendered.append(result)
                 covered_nums.add(fig_num)
-                log.info("Rendered vector Figure %d from page %d", fig_num, page_1idx)
-            except Exception as exc:
-                log.warning("Failed saving Figure %d from page %d: %s", fig_num, page_1idx, exc)
+                log.info(
+                    "Tight-cropped Figure %d from page %d (%dx%d px)",
+                    fig_num, page_num + 1, result["width"], result["height"],
+                )
 
     return rendered
 
