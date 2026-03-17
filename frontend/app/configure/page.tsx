@@ -64,10 +64,9 @@ const TEMPLATE_STYLES: {
   },
 ];
 
-const FREE_FORMATS: TalkFormat[] = ["lightning"];
-
-function isPro(f: TalkFormat) {
-  return !FREE_FORMATS.includes(f);
+function needsSubscription(f: TalkFormat, lightningUsed: boolean) {
+  if (f === "lightning") return lightningUsed;
+  return true;
 }
 
 export default function ConfigurePage() {
@@ -92,11 +91,16 @@ function ConfigureInner() {
   const [submitting, setSubmitting] = useState(false);
 
   const [subscribed, setSubscribed] = useState(false);
+  const [lightningUsed, setLightningUsed] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [showToast, setShowToast] = useState(false);
 
-  // Check subscription status on load
+  // Check free-tier usage and subscription status on load
   useEffect(() => {
+    if (localStorage.getItem("ss_lightning_used") === "true") {
+      setLightningUsed(true);
+    }
+
     const stored = localStorage.getItem("ss_subscription");
     if (stored) {
       try {
@@ -196,6 +200,12 @@ function ConfigureInner() {
 
       const data = await res.json();
       if (!data.job_id) throw new Error("No job_id returned from server");
+
+      // Mark Lightning as used after successful generation
+      if (format === "lightning") {
+        localStorage.setItem("ss_lightning_used", "true");
+        setLightningUsed(true);
+      }
 
       // Store active job for the banner to pick up
       const activeJob = {
@@ -303,7 +313,8 @@ function ConfigureInner() {
             </h2>
             <div className="grid gap-3 sm:grid-cols-3">
               {TALK_FORMATS.map((f) => {
-                const locked = isPro(f.value) && !subscribed;
+                const locked = needsSubscription(f.value, lightningUsed) && !subscribed;
+                const isFreeOnce = f.value === "lightning" && !lightningUsed && !subscribed;
                 return (
                   <button
                     key={f.value}
@@ -325,6 +336,11 @@ function ConfigureInner() {
                     {locked && (
                       <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
                         &#x1F512; Pro
+                      </span>
+                    )}
+                    {isFreeOnce && (
+                      <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full bg-green-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                        Free
                       </span>
                     )}
                     <span className="text-xl">{f.icon}</span>
@@ -395,7 +411,7 @@ function ConfigureInner() {
         {/* Generate button */}
         <button
           onClick={() => {
-            if (isPro(format) && !subscribed) {
+            if (needsSubscription(format, lightningUsed) && !subscribed) {
               setShowUpgrade(true);
             } else {
               handleGenerate();
